@@ -450,11 +450,15 @@ using _DispatchEvent =
             void* mgr, uint32_t eventId, uint32_t param2, uint8_t param3);
 */
 
-using _WriteString = void(__fastcall*)(void* builder, const char *key, int64_t n);
+using _WriteString = void(__fastcall*)(void* builder, const char *value, int64_t n);
 
 using _WriteKey = void(__fastcall*)(void* builder, const char *key, int64_t n);
 
 using _WeaponChange = void(__fastcall*)(int64_t p1, int p2);
+
+
+using _ApplyWeaponState = void(__fastcall*)(int64_t player, int64_t source,
+        int64_t dest, int64_t secondarySource);
 
 
 // Game Addresses
@@ -466,6 +470,14 @@ DispatchEvent (
 );
 _DispatchEvent DispatchEvent_Original = nullptr;
 */
+
+
+RVA<_ApplyWeaponState>
+ApplyWeaponState (
+    "4c 8b dc 53 56 48 81 ec 48 05 00 00 48 8b 05 95 b5 36 04 48 33 c4 48 89 "
+    "84 24 10 05 00 00 49 8b 70 18 48 8b da"
+);
+_ApplyWeaponState ApplyWeaponState_Original = nullptr;
 
 RVA<_WriteString>
 WriteString (
@@ -513,18 +525,27 @@ namespace DualsenseMod {
     // Read and populate offsets and addresses from game code
     bool PopulateOffsets() {
 
-        /*
         _LOG("WriteString at %p",
             WriteString.GetUIntPtr()
         );
-        */
 
+        _LOG("WriteKey at %p",
+            WriteKey.GetUIntPtr()
+        );
 
         _LOG("WeaponChange at %p",
             WeaponChange.GetUIntPtr()
         );
 
-        if (!WeaponChange)
+
+        _LOG("ApplyWeaponState at %p",
+            ApplyWeaponState.GetUIntPtr()
+        );
+
+        if (!WeaponChange ||
+            !WriteString  ||
+            !WriteKey     ||
+            !ApplyWeaponState)
             return false;
 
         if (!g_deadspaceBaseAddr) {
@@ -580,44 +601,137 @@ namespace DualsenseMod {
 
 #include <intrin.h>
 
+// helper functions
 static void* GetCaller() {
     return _ReturnAddress();
 }
 
-void WriteString_Hook (void* builder, const char *key, int64_t n) {
-
-    void* caller = GetCaller();
-
-    if (key && (strstr(key, "GearType_Weapon_") || strcmp(key, "current_weapon") == 0)) {
-        _LOGD("WriteString caller=%p builder=%p key=%s", caller, builder, key);
-    }
-
-    WriteString_Original(builder, key, n);
+static int ReadCurrentWeaponId(int64_t p1) {
+    if (!p1) return -1;
+    auto state = *(int64_t*)(p1 + 0x1278);
+    if (!state) return -1;
+    return *(int*)(state + 0x20);
 }
 
+static thread_local const char* g_lastKey = nullptr;
 
 void WriteKey_Hook (void* builder, const char *key, int64_t n) {
 
-    void* caller = GetCaller();
 
-    //if (key && (strstr(key, "GearType_Weapon_") || strcmp(key, "current_weapon") == 0)) {
-    if (key) {
-        _LOGD("WriteKey caller=%p builder=%p key=%s", caller, builder, key);
+    if (key && (strcmp(key, "current_weapon") == 0)) {
+        g_lastKey = key;
+    } else {
+        g_lastKey = nullptr;
     }
 
     WriteKey_Original(builder, key, n);
 }
 
-void WeaponChange_Hook (int64_t p1, int p2) {
-    auto state = *(int64_t*)(p1 + 0x1278);
-    int old = state ? *(int*)(state + 0x20) : -1;
+void WriteString_Hook (void* builder, const char *value, int64_t n) {
 
-    if (state && old != p2) {
-        // weapon changed: p2 is new weapon
-        // set DualSense trigger profile here
-        _LOGD("WeaponChange: p2: %d", p2);
+    if (g_lastKey && (strcmp(g_lastKey, "current_weapon") == 0) && value) {
+        _LOGD("WriteString hook - Current Weapon: %s", value);
+        //1int prev = g_lastWeaponId.exchange(value);
+        /*
+        if (prev != value) {
+            // send adaptive triggers
+        }
+        */
     }
+
+    WriteString_Original(builder, value, n);
+}
+
+/*
+static void Dump32(const char* tag, uint8_t* p, int off)
+{
+    if (!p) return;
+    uint32_t v0 = *(uint32_t*)(p + off);
+    uint32_t v1 = *(uint32_t*)(p + off + 4);
+    uint32_t v2 = *(uint32_t*)(p + off + 8);
+    uint32_t v3 = *(uint32_t*)(p + off + 12);
+    _LOGD("%s +%X: %08X %08X %08X %08X", tag, off, v0, v1, v2, v3);
+}
+
+void ApplyWeaponState_Hook(int64_t player, int64_t source,
+                           int64_t dest, int64_t secondarySource)
+{
+    uint8_t* out = dest ? *(uint8_t**)(dest + 0x18) : nullptr;
+
+    ApplyWeaponState_Original(player, source, dest, secondarySource);
+
+    if (!out) return;
+
+    static uint64_t lastTick = 0;
+    uint64_t now = GetTickCount64();
+    if (now - lastTick > 1000) {
+        lastTick = now;
+        Dump32("[AWS]", out, 0x4C0);
+        Dump32("[AWS]", out, 0x4D0);
+        Dump32("[AWS]", out, 0x4E0);
+        Dump32("[AWS]", out, 0x4E4); // yes, small overlap is fine
+    }
+}
+*/
+
+
+static void DumpU32(uint8_t* p, int off) {
+    uint32_t v = *(uint32_t*)(p + off);
+    _LOGD("[AWS] +%03X = %08X (%d)", off, v, (int32_t)v);
+}
+
+static std::atomic<int>  g_lastWeaponId{-1};
+
+void ApplyWeaponState_Hook(int64_t player, int64_t source,
+                           int64_t dest, int64_t secondarySource)
+{
+
+    uint8_t* out = dest ? *(uint8_t**)(dest + 0x18) : nullptr;
+
+    ApplyWeaponState_Original(player, source, dest, secondarySource);
+
+    if (!out) return;
+
+    // only dump once every ~250ms so it’s responsive but not insane!
+    static uint64_t lastTick = 0;
+    uint64_t now = GetTickCount64();
+    if (now - lastTick < 250) return;
+    lastTick = now;
+
+    // weapon offest: 0x4E4
+    int weaponId = *(int*)(out + 0x4E4);
+
+    if (weaponId < 0 || weaponId > 100)
+        return;
+
+    int prev = g_lastWeaponId.exchange(weaponId);
+    if (prev != weaponId) {
+        _LOGD("[ApplyWeaponState Hook] current weapon id: %d", weaponId);
+    }
+
+#if 0
+    // Scan around the area you think matters
+    DumpU32(out_before, 0x4C0);
+    DumpU32(out_before, 0x4CC);
+    DumpU32(out_before, 0x4D0);
+    DumpU32(out_before, 0x4D4);
+    DumpU32(out_before, 0x4DC);
+    DumpU32(out_before, 0x4E0);
+    DumpU32(out_before, 0x4E4);
+    DumpU32(out_before, 0x4E8);
+#endif
+}
+
+void WeaponChange_Hook (int64_t p1, int p2) {
     WeaponChange_Original(p1, p2);
+
+    int cur = ReadCurrentWeaponId(p1);
+    if (cur < 0) return;
+
+    // weapon changed: p2 is new weapon
+    // set DualSense trigger profile here
+    _LOGD("WeaponChange: p2: %d", p2);
+    _LOGD("WeaponChange: cur: %d", cur);
 }
 
 /*
@@ -657,14 +771,14 @@ unsigned long long SelectWeaponByDeclExplicit_Hook(long long *player,
         _LOG("Applying hooks...");
         // Hook loadout type registration to obtain pointer to the model handle
         MH_Initialize();
-        /*
+
         MH_CreateHook (
-            DispatchEvent,
-            DispatchEvent_Hook,
-            reinterpret_cast<LPVOID *>(&DispatchEvent_Original)
+            WriteKey,
+            WriteKey_Hook,
+            reinterpret_cast<LPVOID *>(&WriteKey_Original)
         );
-        if (MH_EnableHook(DispatchEvent) != MH_OK) {
-            _LOG("FATAL: Failed to install DispatchEvent hook.");
+        if (MH_EnableHook(WriteKey) != MH_OK) {
+            _LOG("FATAL: Failed to install WriteKey hook.");
             return false;
         }
 
@@ -677,8 +791,6 @@ unsigned long long SelectWeaponByDeclExplicit_Hook(long long *player,
             _LOG("FATAL: Failed to install WriteString hook.");
             return false;
         }
-        */
-
 
         MH_CreateHook (
             WeaponChange,
@@ -690,18 +802,17 @@ unsigned long long SelectWeaponByDeclExplicit_Hook(long long *player,
             return false;
         }
 
-/*
+
         MH_CreateHook (
-            SelectWeaponByDeclExplicit,
-            SelectWeaponByDeclExplicit_Hook,
-            reinterpret_cast<LPVOID *>(&SelectWeaponByDeclExplicit_Original)
+            ApplyWeaponState,
+            ApplyWeaponState_Hook,
+            reinterpret_cast<LPVOID *>(&ApplyWeaponState_Original)
         );
-        if (MH_EnableHook(SelectWeaponByDeclExplicit) != MH_OK) {
-            _LOG("FATAL: Failed to install SelectWeaponByDeclExplicit hook.");
+        if (MH_EnableHook(ApplyWeaponState) != MH_OK) {
+            _LOG("FATAL: Failed to install ApplyWeaponState hook.");
             return false;
         }
 
-*/
         _LOG("Hooks applied successfully!");
 
         return true;
