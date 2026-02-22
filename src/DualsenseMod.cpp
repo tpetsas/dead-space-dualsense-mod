@@ -410,6 +410,7 @@ void SendTriggers(std::string weaponName) {
 // Game global vars
 
 HMODULE g_deadspaceBaseAddr = nullptr;
+static uintptr_t g_base = 0;
 
 std::vector<std::string> g_AmmoList = {
     "bullets",  // heavy_rifle_heavy_ar, chaingun
@@ -460,6 +461,23 @@ using _WeaponChange = void(__fastcall*)(int64_t p1, int p2);
 using _ApplyWeaponState = void(__fastcall*)(int64_t player, int64_t source,
         int64_t dest, int64_t secondarySource);
 
+using  _InterruptGame = void(__fastcall*)(
+    void*   param_1,
+    int     param_2,
+    int64_t param_3,
+    void*   param_4
+);
+
+using _ResumeGame = void(__fastcall*)(void* param_1, int param_2, int64_t param_3, int64_t param_4);
+//using _EnterKinesisState = void(__fastcall*)(void *self);
+using _EnterKinesisState = void(__fastcall*)(long long *param_1,long long *param_2,long long *param_3);
+using _ExitKinesisState = void(__fastcall*)(void *self);
+
+static inline int32_t ReadKinesisCounter(void* self) {
+    return *(int32_t*)((uint8_t*)self + 0x4C); // <-- BYTE offset, 32-bit
+}
+
+
 
 // Game Addresses
 
@@ -487,6 +505,12 @@ WriteString (
 );
 _WriteString WriteString_Original = nullptr;
 
+//RVA<_EventHandler>
+//EventHandler (
+//    "48 89 5c 24 08 48 89 74 24 10 57 48 83 ec 20 49 8b d8 48 8b f2 48 8b f9 "
+//    "49 83 f8 ff 75 0b 66 90 48 ff c3 80 3c 1a 00 75 f7 e8 52 2e 00 00"
+//);
+//_EventHandler EventHandler_Original = nullptr;
 
 RVA<_WriteKey>
 WriteKey (
@@ -505,6 +529,40 @@ WeaponChange (
         "8d 54 24 30"
 );
 _WeaponChange WeaponChange_Original = nullptr;
+
+
+RVA<_InterruptGame>
+InterruptGame (
+    "81 fa ff 00 00 00 0f 84 83 05 00 00 48 8b c4 4c 89 48 20"
+);
+_InterruptGame InterruptGame_Original = nullptr;
+
+
+RVA<_ResumeGame>
+ResumeGame (
+    "89 54 24 10 55 56 41 56 41 57 48 83 ec 38 4c 8b 51 10 8b f2"
+);
+_ResumeGame ResumeGame_Original = nullptr;
+
+
+  //"48 89 5c 24 08 57 48 83 ec 20 48 8b 01 48 8b f9 48 8b 10 48 8b 5a 38 "
+  //"48 85 db 74 08 48 8b cb e8 ? ? ? ? ff 47 4c"
+RVA<_EnterKinesisState>
+EnterKinesisState (
+  "85 d2 0f 84 ec 00 00 00 55 57 48 83 ec 58 48 89 5c 24 78 49 8b f8 48 89 74 24 50 48 8d 59 10"
+);
+_EnterKinesisState EnterKinesisState_Original = nullptr;
+
+
+RVA<_ExitKinesisState>
+ExitKinesisState (
+  "48 89 5c 24 08 57 48 83 ec 20 48 8b 01 48 8b f9 48 8b 10 48 8b 5a 38 "
+  "48 85 db 74 08 48 8b cb e8 ? ? ? ? ff 4f 4c"
+);
+_ExitKinesisState ExitKinesisState_Original = nullptr;
+
+
+
 
 // weapon switch dead space
 
@@ -542,10 +600,33 @@ namespace DualsenseMod {
             ApplyWeaponState.GetUIntPtr()
         );
 
-        if (!WeaponChange ||
-            !WriteString  ||
-            !WriteKey     ||
-            !ApplyWeaponState)
+
+        _LOG("InterruptGame at %p",
+            InterruptGame.GetUIntPtr()
+        );
+
+
+        _LOG("ResumeGame at %p",
+            ResumeGame.GetUIntPtr()
+        );
+
+        _LOG("EnterKinesisState at %p",
+            EnterKinesisState.GetUIntPtr()
+        );
+
+        _LOG("ExitKinesisState at %p",
+            ExitKinesisState.GetUIntPtr()
+        );
+
+
+        if (!WeaponChange       ||
+            !WriteString        ||
+            !WriteKey           ||
+            !ApplyWeaponState   ||
+            !InterruptGame      ||
+            !ResumeGame         ||
+            !EnterKinesisState  ||
+            !ExitKinesisState)
             return false;
 
         if (!g_deadspaceBaseAddr) {
@@ -617,26 +698,27 @@ static thread_local const char* g_lastKey = nullptr;
 
 void WriteKey_Hook (void* builder, const char *key, int64_t n) {
 
+    //_LOGD("WriteKey hook - key: %s", key);
+    //if (key && (strncmp(key, "is_", 3) == 0))
+    //    _LOGD("WriteKey hook - key: %s", key);
 
-    if (key && (strcmp(key, "current_weapon") == 0)) {
-        g_lastKey = key;
-    } else {
-        g_lastKey = nullptr;
-    }
-
+    g_lastKey = key;
     WriteKey_Original(builder, key, n);
 }
 
 void WriteString_Hook (void* builder, const char *value, int64_t n) {
 
-    if (g_lastKey && (strcmp(g_lastKey, "current_weapon") == 0) && value) {
-        _LOGD("WriteString hook - Current Weapon: %s", value);
-        //1int prev = g_lastWeaponId.exchange(value);
-        /*
-        if (prev != value) {
-            // send adaptive triggers
+    if (g_lastKey && value) {
+
+        if (strcmp(g_lastKey, "current_weapon") == 0) {
+            _LOGD("WriteString hook - Current Weapon: %s", value);
         }
-        */
+        if (strcmp(g_lastKey, "ability_mode") == 0) {
+            // guess: value might become "kinesis" / "telekinesis" / etc
+            bool active = (strcmp(value, "kinesis") == 0) || (strstr(value, "kinesis") != nullptr);
+            //g_kinesisActive.store(active, std::memory_order_release);
+            _LOGD("ability_mode=%s => kinesisActive=%d", value, active);
+        }
     }
 
     WriteString_Original(builder, value, n);
@@ -734,6 +816,124 @@ void WeaponChange_Hook (int64_t p1, int p2) {
     _LOGD("WeaponChange: cur: %d", cur);
 }
 
+static const char* TryGetCString(uint64_t p)
+{
+    if (!p) return nullptr;
+
+    __try {
+        // First assume p is directly a C-string
+        const char* s = (const char*)p;
+
+        // Very cheap sanity: must be readable and NUL-terminated “soon-ish”
+        for (int i = 0; i < 256; i++) {
+            char c = s[i];
+            if (c == '\0') return s;
+            // optional: reject totally weird bytes early
+            if ((unsigned char)c < 0x09) return nullptr;
+        }
+
+        // If not NUL-terminated quickly, maybe p is pointer-to-pointer
+        const char* s2 = *(const char**)p;
+        if (!s2) return nullptr;
+
+        for (int i = 0; i < 256; i++) {
+            char c = s2[i];
+            if (c == '\0') return s2;
+            if ((unsigned char)c < 0x09) return nullptr;
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
+
+    return nullptr;
+}
+
+
+static std::atomic<int32_t> g_lastEvent{0};
+
+static const char* SafeNameFromEvt(int64_t evt) {
+    __try {
+        int64_t p = *(int64_t*)(evt + 0x30);
+        if (!p) return nullptr;
+        const char* s = *(const char**)(p + 0x10);
+        if (!s) return nullptr;
+        // sanity: avoid garbage pointers / non-terminated strings
+        for (int i = 0; i < 128; i++) {
+            char c = s[i];
+            if (c == '\0') return s;
+            if ((unsigned char)c < 0x09) return nullptr;
+        }
+        return nullptr;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
+}
+
+using  _InterruptGame = void(__fastcall*)(
+    void*   param_1,   // RCX
+    int     param_2,   // EDX
+    int64_t param_3,   // R8
+    void*   param_4    // R9   (was longlong* in decompile; treat as opaque pointer)
+);
+void __fastcall InterruptGame_Hook(void *param_1, int param_2, int64_t param_3, void *param_4)
+{
+    _LOGD("InterruptGame Hook - Game paused or entered in RIG inventory!");
+
+    InterruptGame_Original(param_1, param_2, param_3, param_4);
+}
+
+
+void __fastcall ResumeGame_Hook (void* param_1, int param_2, int64_t param_3, int64_t param_4)
+{
+    _LOGD("ResumeGame Hook - Game is on again!");
+
+    ResumeGame_Original(param_1, param_2, param_3, param_4);
+}
+
+static inline uintptr_t addrToRVA(void* p) {
+    return reinterpret_cast<uintptr_t>(p) - g_base;
+}
+static bool IsInterestingEnter(void* ret) {
+    return addrToRVA(ret) == 0x93B45B;
+}
+static bool IsInterestingExit(void* ret) {
+    return addrToRVA(ret) == 0x93F29B;
+}
+
+static std::atomic<bool> g_kinesisActive{false};
+
+//void __fastcall EnterKinesisState_Hook (void *self)
+void __fastcall EnterKinesisState_Hook (long long *param_1,long long *param_2,long long *param_3)
+{
+    //EnterKinesisState_Original(self);
+    EnterKinesisState_Original(param_1, param_2, param_3);
+
+    //g_kinesisActive.store(true, std::memory_order_release);
+    _LOGD("Kinesis ACTIVE!");
+
+}
+
+
+void __fastcall ExitKinesisState_Hook (void *self)
+{
+    void* caller = _ReturnAddress();
+    int32_t before = ReadKinesisCounter(self);
+    ExitKinesisState_Original(self);
+    int32_t after = ReadKinesisCounter(self);
+
+     if (!(before == 1 && after == 0))
+        return;
+
+    if (!IsInterestingExit(caller))
+        return;
+
+    g_kinesisActive.store(false, std::memory_order_release);
+    _LOGD("Kinesis INACTIVE (counter %d -> %d, self=%p, caller=%p)", before, after, self, caller);
+
+}
+
+
 /*
 unsigned long long SelectWeaponByDeclExplicit_Hook(long long *player,
                             long long decl, char param_3, char param_4) {
@@ -813,6 +1013,49 @@ unsigned long long SelectWeaponByDeclExplicit_Hook(long long *player,
             return false;
         }
 
+
+        MH_CreateHook (
+            InterruptGame,
+            InterruptGame_Hook,
+            reinterpret_cast<LPVOID *>(&InterruptGame_Original)
+        );
+        if (MH_EnableHook(InterruptGame) != MH_OK) {
+            _LOG("FATAL: Failed to install InterruptGame hook.");
+            return false;
+        }
+
+
+        MH_CreateHook (
+            ResumeGame,
+            ResumeGame_Hook,
+            reinterpret_cast<LPVOID *>(&ResumeGame_Original)
+        );
+        if (MH_EnableHook(ResumeGame) != MH_OK) {
+            _LOG("FATAL: Failed to install ResumeGame hook.");
+            return false;
+        }
+        MH_CreateHook (
+            EnterKinesisState,
+            EnterKinesisState_Hook,
+            reinterpret_cast<LPVOID *>(&EnterKinesisState_Original)
+        );
+        if (MH_EnableHook(EnterKinesisState) != MH_OK) {
+            _LOG("FATAL: Failed to install EnterKinesisState hook.");
+            return false;
+        }
+
+#if 0
+        MH_CreateHook (
+            ExitKinesisState,
+            ExitKinesisState_Hook,
+            reinterpret_cast<LPVOID *>(&ExitKinesisState_Original)
+        );
+        if (MH_EnableHook(ExitKinesisState) != MH_OK) {
+            _LOG("FATAL: Failed to install ExitKinesisState hook.");
+            return false;
+    }
+#endif
+
         _LOG("Hooks applied successfully!");
 
         return true;
@@ -858,6 +1101,8 @@ std::string wstring_to_utf8(const std::wstring& ws) {
         _LOG(
             "Dead Space (2023) DualsenseMod v1.0 by Thanos Petsas (SkyExplosionist)");
         g_deadspaceBaseAddr = GetModuleHandle(NULL);
+        g_base = reinterpret_cast<uintptr_t>(g_deadspaceBaseAddr);
+        _LOG("Module base: %p (g_base=%p)", g_deadspaceBaseAddr, (void*)g_base);
         _LOG("Module base: %p", g_deadspaceBaseAddr);
 
         // Sigscan
@@ -881,7 +1126,18 @@ std::string wstring_to_utf8(const std::wstring& ws) {
 
         InitTriggerSettings();
 
-        ApplyHooks();
+        if (!ApplyHooks()) {
+            MessageBoxA (
+                NULL,
+                "DualsenseMod is not compatible with this version of Dead Space"
+                " (2023).\nPlease visit the mod page for updates.\n\n"
+                "Error message: Could not apply hooks!",
+                "DualsenseMod",
+                MB_OK | MB_ICONEXCLAMATION
+            );
+            _LOG("FATAL: Incompatible version");
+            return;
+        }
 
         CreateThread(nullptr, 0, [](LPVOID) -> DWORD {
             _LOG("Client starting DualSensitive Service...\n");
