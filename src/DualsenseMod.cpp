@@ -470,8 +470,20 @@ using  _InterruptGame = void(__fastcall*)(
 
 using _ResumeGame = void(__fastcall*)(void* param_1, int param_2, int64_t param_3, int64_t param_4);
 //using _EnterKinesisState = void(__fastcall*)(void *self);
-using _EnterKinesisState = void(__fastcall*)(long long *param_1,long long *param_2,long long *param_3);
+using _EnterKinesisState = void(__fastcall*)(long long *param_1,long long *param_2
+        ,long long *param_3
+#if 0
+        , unsigned int param_4, void * param_5
+        , long long param_6
+        , void *param_7, void *param_8, void *param_9
+#endif
+);
 using _ExitKinesisState = void(__fastcall*)(void *self);
+
+using _EventDispatcher = bool(__fastcall*)(
+    void* a1, void* a2, void* a3,
+    uint64_t a4, uint64_t a5, uint32_t a6
+);
 
 static inline int32_t ReadKinesisCounter(void* self) {
     return *(int32_t*)((uint8_t*)self + 0x4C); // <-- BYTE offset, 32-bit
@@ -549,7 +561,16 @@ _ResumeGame ResumeGame_Original = nullptr;
   //"48 85 db 74 08 48 8b cb e8 ? ? ? ? ff 47 4c"
 RVA<_EnterKinesisState>
 EnterKinesisState (
-  "85 d2 0f 84 ec 00 00 00 55 57 48 83 ec 58 48 89 5c 24 78 49 8b f8 48 89 74 24 50 48 8d 59 10"
+        "48 3b ca 0f 84 e2 00 00 00 55 57 48 83 ec 48 48 89 5c 24 70 49 8b f8 48 89 74 24 40 48 8d 59 10 4c 89 64 24 38 48 8b ea 4c 89 6c 24 30 4c 89 74 24 28 4c 89 7c 24 20 66 0f 1f 84 00 00 00 00 00"
+//        "48 89 5c 24 08 48 89 6c 24 10 48 89 74 24 18 57 48 83 ec 20 49 8b f9 49 8b f0 48 8b ea 48 8b d9 4d 85 c9 74 08 49 8b c9 e8 d3 f7 a7 00"
+        //"4c 8b dc 55 53 57 49 8d ab 18 fc ff ff 48 81 ec d0 04 00 00 48 8b 05 bd b5 4b 04 48 33 c4 48 89 85 b0 03 00 00 48 8b 1d 74 f2 50 04 49 8b f8"
+    //"48 8b c4 55 56 57 48 83 ec 70 48 89 58 e0 48 8b fa 4c 89 70 c8 bd 01 00 00 00 4c 89 78 c0 4c 8b f1"
+        //"48 89 5c 24 10 4c 89 4c 24 20 55 56 57 41 54 41 55 41 56 41 57 48 81 ec 80 00 00 00 48 8b 19 4c 8b e1 45 8b f8 4c 8b ea 48 89 9c 24 c0 00 00 00 8b 73 fc 0f ba f6 1f 48 c1 e6 06 48 03 f3"
+//"48 89 5c 24 10 48 89 6c 24 18 48 89 74 24 20 57 41 54 41 55 41 56 41 57 48 83 ec 20 48 8b 7a 10 48 8b d9 48 8b 02 8b 72 38"
+        //"48 89 5c 24 10 48 89 6c 24 18 48 89 74 24 20 57 41 54 41 55 41 56 41 57 48 83 ec 20 48 c7 41 10 00 00 00 00 48 8b d9 48 8b 7a 10 48 8b 02 8b 72 38 48 8b 6a 30 4c 8b 72 28 4c 8b 7a 20 4c 8b 62 18 4c 8b 6a 08 48 89 44 24 50 48 85 ff 74 08 48 8b cf e8 f9 29 a9 00"
+        //"40 53 41 56 48 83 ec 58 49 8b d8 4c 8b f2 48 3b ca 0f 84 f9 00 00 00 48 89 6c 24 50 48 89 74 24 48 48 8b f3"
+    //"48 89 5c 24 08 55 56 57 41 54 41 55 41 56 41 57 48 81 ec b0 00 00 00 4c 8b ac 24 10 01 00 00 4c 8b e2 45 8b f9 41 8b e8 45 3b c1 0f 84 9d 00 00 00"
+  //"85 d2 0f 84 ec 00 00 00 55 57 48 83 ec 58 48 89 5c 24 78 49 8b f8 48 89 74 24 50 48 8d 59 10"
 );
 _EnterKinesisState EnterKinesisState_Original = nullptr;
 
@@ -561,7 +582,11 @@ ExitKinesisState (
 );
 _ExitKinesisState ExitKinesisState_Original = nullptr;
 
-
+RVA<_EventDispatcher>
+EventDispatcher (
+        "48 8b c4 48 89 58 10 48 89 70 18 48 89 78 20 55 41 54 41 55 41 56 41 57 48 8d 68 b1 48 81 ec f0 00 00 00 0f 57 c0 0f 29 70 c8 0f 11 44 24 40 45 33 ff"
+);
+_EventDispatcher EventDispatcher_Original = nullptr;
 
 
 // weapon switch dead space
@@ -618,6 +643,9 @@ namespace DualsenseMod {
             ExitKinesisState.GetUIntPtr()
         );
 
+        _LOG("EventDispatcher at %p",
+            EventDispatcher.GetUIntPtr()
+        );
 
         if (!WeaponChange       ||
             !WriteString        ||
@@ -626,7 +654,8 @@ namespace DualsenseMod {
             !InterruptGame      ||
             !ResumeGame         ||
             !EnterKinesisState  ||
-            !ExitKinesisState)
+            !ExitKinesisState   ||
+            !EventDispatcher)
             return false;
 
         if (!g_deadspaceBaseAddr) {
@@ -708,17 +737,17 @@ void WriteKey_Hook (void* builder, const char *key, int64_t n) {
 
 void WriteString_Hook (void* builder, const char *value, int64_t n) {
 
-    if (g_lastKey && value) {
 
+    if (g_lastKey && value) {
+        _LOGD("WriteString hook - key: %s, value: %s", g_lastKey, value);
+#if 0
         if (strcmp(g_lastKey, "current_weapon") == 0) {
             _LOGD("WriteString hook - Current Weapon: %s", value);
         }
-        if (strcmp(g_lastKey, "ability_mode") == 0) {
-            // guess: value might become "kinesis" / "telekinesis" / etc
-            bool active = (strcmp(value, "kinesis") == 0) || (strstr(value, "kinesis") != nullptr);
-            //g_kinesisActive.store(active, std::memory_order_release);
-            _LOGD("ability_mode=%s => kinesisActive=%d", value, active);
+        if (strstr(g_lastKey, "ability") != NULL) {
+            _LOGD("ability key=%s => value=%s", g_lastKey, value);
         }
+#endif
     }
 
     WriteString_Original(builder, value, n);
@@ -904,10 +933,27 @@ static bool IsInterestingExit(void* ret) {
 static std::atomic<bool> g_kinesisActive{false};
 
 //void __fastcall EnterKinesisState_Hook (void *self)
-void __fastcall EnterKinesisState_Hook (long long *param_1,long long *param_2,long long *param_3)
+void __fastcall EnterKinesisState_Hook (long long *param_1,long long *param_2
+        ,long long *param_3
+#if 0
+        ,
+    unsigned int param_4, void * param_5
+    , long long param_6
+        , void *param_7, void *param_8, void *param_9
+#endif
+        )
 {
     //EnterKinesisState_Original(self);
-    EnterKinesisState_Original(param_1, param_2, param_3);
+    EnterKinesisState_Original(param_1, param_2
+            , param_3
+#if 0
+            ,
+        param_4, param_5
+        , param_6
+
+        , param_7, param_8, param_9
+#endif
+            );
 
     //g_kinesisActive.store(true, std::memory_order_release);
     _LOGD("Kinesis ACTIVE!");
@@ -933,7 +979,120 @@ void __fastcall ExitKinesisState_Hook (void *self)
 
 }
 
+static const char* TryGetEventNameFromArg(uint64_t a)
+{
+    // 1) a is directly a char*
+    if (auto s = TryGetCString(a)) return s;
 
+    // 2) a is pointer to something, first qword is char*
+    __try {
+        uint64_t p0 = *(uint64_t*)a;
+        if (auto s = TryGetCString(p0)) return s;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+    // 3) common “string object” layouts: char* at +8 or +0x10
+    __try {
+        uint64_t p8 = *(uint64_t*)(a + 8);
+        if (auto s = TryGetCString(p8)) return s;
+
+        uint64_t p10 = *(uint64_t*)(a + 0x10);
+        if (auto s = TryGetCString(p10)) return s;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+    return nullptr;
+}
+
+static inline bool IsCanonicalUserPtr(uint64_t p) {
+    // Typical user-mode canonical range on Windows x64
+    return (p >= 0x0000000000010000ULL) && (p <= 0x00007FFFFFFFFFFFULL);
+}
+
+static const char* TryAsciiAt(uint64_t p) {
+    if (!IsCanonicalUserPtr(p)) return nullptr;
+    __try {
+        auto s = (const char*)p;
+        // require first char printable-ish
+        unsigned char c0 = (unsigned char)s[0];
+        if (c0 == 0) return nullptr;
+        if (c0 < 0x20 || c0 > 0x7E) return nullptr;
+
+        for (int i = 0; i < 128; i++) {
+            unsigned char c = (unsigned char)s[i];
+            if (c == 0) return s;
+            if (c < 0x20 || c > 0x7E) return nullptr;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return nullptr;
+}
+
+static const char* TryStringObject(uint64_t a) {
+    // Try direct
+    if (auto s = TryAsciiAt(a)) return s;
+
+    if (!IsCanonicalUserPtr(a)) return nullptr;
+
+    __try {
+        // Try common layouts: [0]=char*, [1]=char*, at +0x10, +0x18, etc
+        uint64_t q0 = *(uint64_t*)(a + 0x00);
+        uint64_t q8 = *(uint64_t*)(a + 0x08);
+        uint64_t q10 = *(uint64_t*)(a + 0x10);
+        uint64_t q18 = *(uint64_t*)(a + 0x18);
+
+        if (auto s = TryAsciiAt(q0)) return s;
+        if (auto s = TryAsciiAt(q8)) return s;
+        if (auto s = TryAsciiAt(q10)) return s;
+        if (auto s = TryAsciiAt(q18)) return s;
+
+        // Sometimes: pointer-to-pointer
+        if (IsCanonicalUserPtr(q0)) {
+            uint64_t qq0 = *(uint64_t*)q0;
+            if (auto s = TryAsciiAt(qq0)) return s;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+    return nullptr;
+}
+
+static void DumpQwords(const char* tag, uint64_t p) {
+    if (!IsCanonicalUserPtr(p)) return;
+    __try {
+        uint64_t q0 = *(uint64_t*)(p + 0x00);
+        uint64_t q8 = *(uint64_t*)(p + 0x08);
+        uint64_t q10 = *(uint64_t*)(p + 0x10);
+        uint64_t q18 = *(uint64_t*)(p + 0x18);
+        _LOGD("%s %p: [%016llX %016llX %016llX %016llX]", tag, (void*)p, q0, q8, q10, q18);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+bool EventDispatcher_Hook(
+    void* a1, void* a2, void* a3,
+    uint64_t a4, uint64_t a5, uint32_t a6
+){
+    void* ret = _ReturnAddress();
+
+    const char* s4 = TryStringObject(a4);
+    const char* s5 = TryStringObject(a5);
+    const char* s3 = TryStringObject((uint64_t)a3);
+
+    if (s4 || s5 || s3) {
+        _LOGD("[EVT] ret=%p a3=%p('%s') a4=%p('%s') a5=%p('%s') a6=%u",
+              ret,
+              a3, s3 ? s3 : "",
+              (void*)a4, s4 ? s4 : "",
+              (void*)a5, s5 ? s5 : "",
+              a6);
+    } else {
+        // Only dump on the hot callsite you already see a lot:
+        // (this is optional, but useful)
+        if ((uintptr_t)ret == 0x0000000140C612BC) {
+            DumpQwords("[a4]", a4);
+            DumpQwords("[a5]", a5);
+            DumpQwords("[a3]", (uint64_t)a3);
+        }
+    }
+
+    return EventDispatcher_Original(a1, a2, a3, a4, a5, a6);
+}
 /*
 unsigned long long SelectWeaponByDeclExplicit_Hook(long long *player,
                             long long decl, char param_3, char param_4) {
@@ -1034,6 +1193,7 @@ unsigned long long SelectWeaponByDeclExplicit_Hook(long long *player,
             _LOG("FATAL: Failed to install ResumeGame hook.");
             return false;
         }
+#if 0
         MH_CreateHook (
             EnterKinesisState,
             EnterKinesisState_Hook,
@@ -1044,7 +1204,6 @@ unsigned long long SelectWeaponByDeclExplicit_Hook(long long *player,
             return false;
         }
 
-#if 0
         MH_CreateHook (
             ExitKinesisState,
             ExitKinesisState_Hook,
@@ -1053,8 +1212,17 @@ unsigned long long SelectWeaponByDeclExplicit_Hook(long long *player,
         if (MH_EnableHook(ExitKinesisState) != MH_OK) {
             _LOG("FATAL: Failed to install ExitKinesisState hook.");
             return false;
-    }
+        }
 #endif
+        MH_CreateHook (
+            EventDispatcher,
+            EventDispatcher_Hook,
+            reinterpret_cast<LPVOID *>(&EventDispatcher_Original)
+        );
+        if (MH_EnableHook(EventDispatcher) != MH_OK) {
+            _LOG("FATAL: Failed to install EventDispatcher hook.");
+            return false;
+        }
 
         _LOG("Hooks applied successfully!");
 
