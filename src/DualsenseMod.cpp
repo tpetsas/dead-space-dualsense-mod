@@ -42,6 +42,70 @@ PROCESS_INFORMATION serverProcInfo;
 
 #include <shellapi.h>
 
+// XInput hooking
+
+#include <windows.h>
+#include <Xinput.h>
+#include <atomic>
+
+using XInputGetState_t = DWORD (WINAPI*)(DWORD, XINPUT_STATE*);
+static XInputGetState_t XInputGetState_Original = nullptr;
+
+// Per-controller last trigger state
+static std::atomic<uint8_t> g_lastLT[4] = {0,0,0,0};
+static std::atomic<bool>    g_ltDown[4] = {false,false,false,false};
+
+// Tune this
+static constexpr uint8_t LT_DOWN_THRESH = 30;   // press threshold
+static constexpr uint8_t LT_UP_THRESH   = 20;   // release threshold (hysteresis)
+
+DWORD WINAPI XInputGetState_Hook(DWORD dwUserIndex, XINPUT_STATE* pState)
+{
+    DWORD ret = XInputGetState_Original(dwUserIndex, pState);
+
+    if (ret == ERROR_SUCCESS && pState && dwUserIndex < 4)
+    {
+        uint8_t lt = pState->Gamepad.bLeftTrigger;
+
+        // hysteresis to avoid flicker around threshold
+        bool wasDown = g_ltDown[dwUserIndex].load(std::memory_order_relaxed);
+        bool isDown  = wasDown;
+
+        if (!wasDown && lt >= LT_DOWN_THRESH) isDown = true;
+        else if (wasDown && lt <= LT_UP_THRESH) isDown = false;
+
+        if (isDown != wasDown)
+        {
+            g_ltDown[dwUserIndex].store(isDown, std::memory_order_relaxed);
+
+            if (isDown) {
+                _LOGD("[XInput] L2 DOWN (user=%u lt=%u)", dwUserIndex, lt);
+            } else {
+                _LOGD("[XInput] L2 UP   (user=%u lt=%u)", dwUserIndex, lt);
+            }
+        }
+
+        g_lastLT[dwUserIndex].store(lt, std::memory_order_relaxed);
+    }
+
+    return ret;
+}
+
+bool HookXInputGetState()
+{
+    HMODULE hX = GetModuleHandleA("xinput1_4.dll");
+    if (!hX) hX = LoadLibraryA("xinput1_4.dll");
+    if (!hX) return false;
+
+    auto p = GetProcAddress(hX, "XInputGetState");
+    if (!p) return false;
+
+    if (MH_CreateHook(p, &XInputGetState_Hook, reinterpret_cast<void**>(&XInputGetState_Original)) != MH_OK)
+        return false;
+
+    return MH_EnableHook(p) == MH_OK;
+}
+
 bool launchServerElevated (
         const std::wstring& exePath = L"./mods/DualSensitive/dualsensitive-service.exe"
     ) {
@@ -739,7 +803,7 @@ void WriteString_Hook (void* builder, const char *value, int64_t n) {
 
 
     if (g_lastKey && value) {
-        _LOGD("WriteString hook - key: %s, value: %s", g_lastKey, value);
+        _LOGD("WriteString hook - key: %s, value: %s, n: %d", g_lastKey, value, n);
 #if 0
         if (strcmp(g_lastKey, "current_weapon") == 0) {
             _LOGD("WriteString hook - Current Weapon: %s", value);
@@ -1221,6 +1285,12 @@ unsigned long long SelectWeaponByDeclExplicit_Hook(long long *player,
         );
         if (MH_EnableHook(EventDispatcher) != MH_OK) {
             _LOG("FATAL: Failed to install EventDispatcher hook.");
+            return false;
+        }
+
+        if (!HookXInputGetState()) {
+            _LOG("WARNING: Failed to hook XInputGetState (continuing).");
+            // You can return false if you want it mandatory
             return false;
         }
 
