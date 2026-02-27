@@ -42,50 +42,155 @@ PROCESS_INFORMATION serverProcInfo;
 
 #include <shellapi.h>
 
+// Kinesis FSM
+
+enum class KinesisState {
+    Idle,
+    Armed,      // L2 down + Circle
+    Active      // Kinesis' target (npc_id) confirmed
+};
+
+static constexpr uint64_t ARM_WINDOW_MS = 250;
+
+static std::atomic<KinesisState> g_kinesisState{KinesisState::Idle};
+static std::atomic<uint64_t> g_armTick{0};
+static std::atomic<bool> g_gameplayActive{true};
+
+static void EndKinesis(const char* reason) {
+    if (g_kinesisState.exchange(KinesisState::Idle) != KinesisState::Idle) {
+        _LOGD("Kinesis INACTIVE (%s)", reason);
+    }
+}
+
 // XInput hooking
 
 #include <windows.h>
 #include <Xinput.h>
 #include <atomic>
 
+enum class PSButton : uint16_t
+{
+    // Face buttons
+    Cross     = XINPUT_GAMEPAD_A,   // ✕
+    Circle    = XINPUT_GAMEPAD_B,   // ○
+    Square    = XINPUT_GAMEPAD_X,   // □
+    Triangle  = XINPUT_GAMEPAD_Y,   // △
+
+    // Shoulders
+    L1 = XINPUT_GAMEPAD_LEFT_SHOULDER,
+    R1 = XINPUT_GAMEPAD_RIGHT_SHOULDER,
+
+    // Sticks
+    L3 = XINPUT_GAMEPAD_LEFT_THUMB,
+    R3 = XINPUT_GAMEPAD_RIGHT_THUMB,
+
+    // System buttons
+    Options = XINPUT_GAMEPAD_START,
+    Share   = XINPUT_GAMEPAD_BACK,
+
+    // D-Pad
+    DPadUp    = XINPUT_GAMEPAD_DPAD_UP,
+    DPadDown  = XINPUT_GAMEPAD_DPAD_DOWN,
+    DPadLeft  = XINPUT_GAMEPAD_DPAD_LEFT,
+    DPadRight = XINPUT_GAMEPAD_DPAD_RIGHT,
+};
+
+inline bool IsPressed(const XINPUT_STATE& s, PSButton b)
+{
+    return (s.Gamepad.wButtons & static_cast<uint16_t>(b)) != 0;
+}
+
+static inline bool ButtonDownEdge(uint16_t prev, uint16_t now, PSButton b) {
+    uint16_t mask = (uint16_t)static_cast<uint16_t>(b);
+    return ((now & mask) != 0) && ((prev & mask) == 0);
+}
+
 using XInputGetState_t = DWORD (WINAPI*)(DWORD, XINPUT_STATE*);
 static XInputGetState_t XInputGetState_Original = nullptr;
 
-// Per-controller last trigger state
-static std::atomic<uint8_t> g_lastLT[4] = {0,0,0,0};
-static std::atomic<bool>    g_ltDown[4] = {false,false,false,false};
+// Per-controller last trigger (L2) state
+static std::atomic<uint8_t> g_lastL2[4] = {0,0,0,0};
+static std::atomic<bool>    g_L2Down[4] = {false,false,false,false};
+static std::atomic<uint16_t> g_prevButtons[4] = {0,0,0,0};
 
 // Tune this
-static constexpr uint8_t LT_DOWN_THRESH = 30;   // press threshold
-static constexpr uint8_t LT_UP_THRESH   = 20;   // release threshold (hysteresis)
+static constexpr uint8_t L2_DOWN_THRESH = 30;   // press threshold
+static constexpr uint8_t L2_UP_THRESH   = 20;   // release threshold (hysteresis)
 
 DWORD WINAPI XInputGetState_Hook(DWORD dwUserIndex, XINPUT_STATE* pState)
 {
     DWORD ret = XInputGetState_Original(dwUserIndex, pState);
 
+    if (!g_gameplayActive)
+        return ret;
+
     if (ret == ERROR_SUCCESS && pState && dwUserIndex < 4)
     {
-        uint8_t lt = pState->Gamepad.bLeftTrigger;
 
-        // hysteresis to avoid flicker around threshold
-        bool wasDown = g_ltDown[dwUserIndex].load(std::memory_order_relaxed);
-        bool isDown  = wasDown;
+        uint16_t currButtons  = pState->Gamepad.wButtons;
+        uint16_t prevButtons = g_prevButtons[dwUserIndex].load (
+            std::memory_order_relaxed
+        );
 
-        if (!wasDown && lt >= LT_DOWN_THRESH) isDown = true;
-        else if (wasDown && lt <= LT_UP_THRESH) isDown = false;
+        bool circleDown = ButtonDownEdge (
+            prevButtons, currButtons, PSButton::Circle
+        );
 
-        if (isDown != wasDown)
-        {
-            g_ltDown[dwUserIndex].store(isDown, std::memory_order_relaxed);
+        // update prev now since we alrready compted if
+        // circle is pressed
+        g_prevButtons[dwUserIndex].store (
+            currButtons, std::memory_order_relaxed
+        );
 
-            if (isDown) {
-                _LOGD("[XInput] L2 DOWN (user=%u lt=%u)", dwUserIndex, lt);
+        if (circleDown) {
+            _LOGD("[XInput] Circle DOWN (user=%u)", dwUserIndex);
+
+            if (g_kinesisState.load() == KinesisState::Active) {
+                EndKinesis("Circle");
             } else {
-                _LOGD("[XInput] L2 UP   (user=%u lt=%u)", dwUserIndex, lt);
+                // transition to armed only if L2 is currently held
+                if (g_L2Down[dwUserIndex].load(std::memory_order_relaxed)) {
+                    g_kinesisState.store(KinesisState::Armed);
+                    g_armTick.store(GetTickCount64());
+                    _LOGD("Kinesis ARMED (L2 held + Circle)");
+                }
             }
         }
 
-        g_lastLT[dwUserIndex].store(lt, std::memory_order_relaxed);
+
+        // L2
+
+        uint8_t l2 = pState->Gamepad.bLeftTrigger;
+
+        // hysteresis to avoid flicker around threshold
+        bool L2_wasDown = g_L2Down[dwUserIndex].load(std::memory_order_relaxed);
+        bool L2_isDown  = L2_wasDown;
+
+        if (!L2_wasDown && l2 >= L2_DOWN_THRESH) L2_isDown = true;
+        else if (L2_wasDown && l2 <= L2_UP_THRESH) L2_isDown = false;
+
+        if (L2_isDown != L2_wasDown)
+        {
+            g_L2Down[dwUserIndex].store(L2_isDown, std::memory_order_relaxed);
+
+            if (L2_isDown && IsPressed(*pState, PSButton::Circle)) {
+                if (g_kinesisState == KinesisState::Active) {
+                    EndKinesis("Circle");
+                } else {
+                    g_kinesisState.store(KinesisState::Armed);
+                    g_armTick.store(GetTickCount64());
+                }
+            }
+
+            if (L2_isDown) {
+                _LOGD("[XInput] L2 DOWN (user=%u l2=%u)", dwUserIndex, l2);
+            } else {
+                _LOGD("[XInput] L2 UP   (user=%u l2=%u)", dwUserIndex, l2);
+                EndKinesis("L2_UP");
+            }
+        }
+
+        g_lastL2[dwUserIndex].store(l2, std::memory_order_relaxed);
     }
 
     return ret;
@@ -787,34 +892,59 @@ static int ReadCurrentWeaponId(int64_t p1) {
     return *(int*)(state + 0x20);
 }
 
-static thread_local const char* g_lastKey = nullptr;
+static std::atomic<const char*> g_lastKeyAtomic{nullptr};
+
+
+static inline uintptr_t RVA(void* p) { return (uintptr_t)p - g_base; }
+
+static inline void* Vtbl(void* obj) {
+    __try { return obj ? *(void**)obj : nullptr; }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
+}
 
 void WriteKey_Hook (void* builder, const char *key, int64_t n) {
+    WriteKey_Original(builder, key, n);
+    if (key && (
+                //!strcmp(key,"ability_mode") || !strcmp(key,"status") ||
+                !strcmp(key, "npc_id"))) {
+        _LOGD("[WK] key=%s n=%lld ret=%p builder=%p", key, (long long)n, _ReturnAddress(), builder);
+    }
 
     //_LOGD("WriteKey hook - key: %s", key);
     //if (key && (strncmp(key, "is_", 3) == 0))
     //    _LOGD("WriteKey hook - key: %s", key);
 
-    g_lastKey = key;
-    WriteKey_Original(builder, key, n);
+    g_lastKeyAtomic.store(key, std::memory_order_relaxed);
+}
+
+static inline uint32_t Low12(void* p) {
+    return (uint32_t)((uintptr_t)p & 0xFFF);
 }
 
 void WriteString_Hook (void* builder, const char *value, int64_t n) {
+    void* ret = _ReturnAddress();
+    void* vt  = Vtbl(builder);
+    WriteString_Original(builder, value, n);
 
+    auto lastKey = g_lastKeyAtomic.load(std::memory_order_relaxed);
 
-    if (g_lastKey && value) {
-        _LOGD("WriteString hook - key: %s, value: %s, n: %d", g_lastKey, value, n);
-#if 0
-        if (strcmp(g_lastKey, "current_weapon") == 0) {
-            _LOGD("WriteString hook - Current Weapon: %s", value);
+    if (lastKey && (
+                //!strcmp(lastKey,"ability_mode") || !strcmp(lastKey,"status") ||
+                !strcmp(lastKey, "npc_id"))) {
+        _LOGD("[WS] key=%s value='%s' n=%lld ret=%p builder=%p Low12(builder)=0x%03X vtbl=%p vtbl_rva=0x%llX",
+              lastKey, value ? value : "(null)", (long long)n, _ReturnAddress(), builder, Low12(builder), vt, vt ? (unsigned long long)RVA(vt) : 0ULL);
+
+        // Enter Kinesis state if kinesis in armed state and
+        // target npc id is found
+        if (g_kinesisState == KinesisState::Armed) {
+            uint64_t now = GetTickCount64();
+            if (now - g_armTick.load() <= ARM_WINDOW_MS) {
+                g_kinesisState.store(KinesisState::Active);
+                _LOGD("Kinesis ACTIVE (target npc_id=%s)", value ? value : "(null)");
+            }
         }
-        if (strstr(g_lastKey, "ability") != NULL) {
-            _LOGD("ability key=%s => value=%s", g_lastKey, value);
-        }
-#endif
     }
 
-    WriteString_Original(builder, value, n);
 }
 
 /*
@@ -972,6 +1102,8 @@ using  _InterruptGame = void(__fastcall*)(
 void __fastcall InterruptGame_Hook(void *param_1, int param_2, int64_t param_3, void *param_4)
 {
     _LOGD("InterruptGame Hook - Game paused or entered in RIG inventory!");
+    g_gameplayActive.store(false, std::memory_order_release);
+    EndKinesis("gameplay paused");
 
     InterruptGame_Original(param_1, param_2, param_3, param_4);
 }
@@ -980,6 +1112,7 @@ void __fastcall InterruptGame_Hook(void *param_1, int param_2, int64_t param_3, 
 void __fastcall ResumeGame_Hook (void* param_1, int param_2, int64_t param_3, int64_t param_4)
 {
     _LOGD("ResumeGame Hook - Game is on again!");
+    g_gameplayActive.store(true, std::memory_order_release);
 
     ResumeGame_Original(param_1, param_2, param_3, param_4);
 }
@@ -1134,24 +1267,14 @@ bool EventDispatcher_Hook(
 ){
     void* ret = _ReturnAddress();
 
-    const char* s4 = TryStringObject(a4);
+    const char* eventName = TryStringObject(a4);
     const char* s5 = TryStringObject(a5);
     const char* s3 = TryStringObject((uint64_t)a3);
 
-    if (s4 || s5 || s3) {
-        _LOGD("[EVT] ret=%p a3=%p('%s') a4=%p('%s') a5=%p('%s') a6=%u",
-              ret,
-              a3, s3 ? s3 : "",
-              (void*)a4, s4 ? s4 : "",
-              (void*)a5, s5 ? s5 : "",
-              a6);
-    } else {
-        // Only dump on the hot callsite you already see a lot:
-        // (this is optional, but useful)
-        if ((uintptr_t)ret == 0x0000000140C612BC) {
-            DumpQwords("[a4]", a4);
-            DumpQwords("[a5]", a5);
-            DumpQwords("[a3]", (uint64_t)a3);
+    if (eventName && !strcmp(eventName, "KinesisThrow")) {
+        if (g_kinesisState.load() != KinesisState::Idle) {
+            _LOGD("Kinesis Throw...");
+            EndKinesis("Throw");
         }
     }
 
