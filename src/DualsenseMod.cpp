@@ -42,6 +42,350 @@ PROCESS_INFORMATION serverProcInfo;
 
 #include <shellapi.h>
 
+struct TriggerSetting {
+    TriggerProfile profile;
+    bool isCustomTrigger = false;
+    TriggerMode mode = TriggerMode::Off;
+    std::vector<uint8_t> extras;
+
+    TriggerSetting(TriggerProfile profile, std::vector<uint8_t> extras) :
+        profile(profile), extras(extras) {}
+
+    TriggerSetting(TriggerMode mode, std::vector<uint8_t> extras) :
+        mode(mode), extras(extras), isCustomTrigger(true) {}
+
+};
+
+struct Triggers {
+    TriggerSetting *L2;
+    TriggerSetting *R2;
+};
+
+// Globals
+Config g_config;
+Logger g_logger;
+
+std::map<std::string, Triggers> g_TriggerSettings ;
+
+
+// Game global vars
+
+HMODULE g_deadspaceBaseAddr = nullptr;
+static uintptr_t g_base = 0;
+
+// holds the id of the current weapon
+static std::atomic<int>  g_currWeaponId{-1};
+
+std::string g_Weapons[8] = {
+    "Plasma Cutter", // 0
+    "Pulse Rifle",   // 1
+    "Flamethrower",  // 2
+    "Force Gun",     // 3
+    "Line Gun",      // 4
+    "Ripper",        // 5
+    "Contact Beam",  // 6
+    "Hand Cannon"    // 7
+};
+
+bool g_HasAmmoInClip[8] = {
+    true, true, true, true, true, true, true, true
+};
+
+
+void InitTriggerSettings() {
+    g_TriggerSettings =
+    {
+        {
+            "Plasma Cutter",
+            {
+                .L2 = new TriggerSetting (
+                        TriggerProfile::Choppy, {}
+                ),
+                .R2 = new TriggerSetting (
+                        TriggerProfile::Bow,
+                        {1, 4, 3, 2}
+                )
+            }
+        },
+        {
+            "Flamethrower",
+            {
+                .L2 = new TriggerSetting (
+                        TriggerMode::Rigid, {}
+                ),
+                .R2 = new TriggerSetting (
+                        TriggerProfile::Galloping,
+                        {3, 9, 1, 2, 30}
+                )
+            }
+        },
+        {
+            "Pulse Rifle",
+            {
+                .L2 = new TriggerSetting (
+                        TriggerMode::Rigid, {}
+                ),
+                .R2 = new TriggerSetting (
+                        TriggerProfile::MultiplePositionVibration,
+                        {14, 0, 1, 2, 3, 4, 5, 6, 7, 8, 8}
+                )
+            }
+        },
+        {
+            "Force Gun",
+            {
+                .L2 = new TriggerSetting (
+                        TriggerProfile::Choppy, {}
+                ),
+                .R2 = new TriggerSetting (
+                        TriggerProfile::Bow,
+                        {0, 4, 8, 8}
+                )
+            }
+        },
+        {
+            "Line Gun",
+            {
+                .L2 = new TriggerSetting (
+                        TriggerMode::Rigid_A,
+                        {60, 71, 56, 128, 195, 210, 255}
+                ),
+                .R2 = new TriggerSetting (
+                    TriggerProfile::SlopeFeedback,
+                    {0, 8, 8, 1}
+                )
+            }
+        },
+        {
+            "Ripper",
+            {
+                .L2 = new TriggerSetting (
+                        TriggerProfile::Machine,
+                        {1, 8, 3, 3, 184, 0}
+                ),
+                .R2 = new TriggerSetting (
+                        TriggerMode::Pulse_B,
+                        {238, 215, 66, 120, 43, 160, 215}
+                )
+            }
+        },
+        /*{
+            "RipperWithSaw",
+            {
+                .L2 = new TriggerSetting (
+                        TriggerProfile::Machine,
+                        {1, 9, 1, 5, 100, 0}
+                ),
+                .R2 = new TriggerSetting (
+                        TriggerProfile::Machine,
+                        {1, 9, 7, 7, 65, 0}
+                )
+            }
+        },*/
+        {
+            "Contact Beam", //"weapon/zion/player/sp/gauss_rifle",
+            {
+                .L2 = new TriggerSetting (
+                        TriggerProfile::Machine,
+                        {7, 9, 0, 1, 8, 1}
+                ),
+                .R2 = new TriggerSetting (
+                        TriggerProfile::Galloping,
+                        {1, 3, 1, 6, 40}
+                )
+            }
+        },
+        {
+            "Hand Cannon",
+            {
+                .L2 = new TriggerSetting (
+                    TriggerProfile::Choppy, {}
+                ),
+                .R2 = new TriggerSetting (
+                    TriggerMode::Pulse_AB,
+                    {18, 197, 35, 58, 90, 120, 138}
+                )
+            }
+        },
+#if 0
+        /*
+           {
+            "weapon/zion/player/sp/pistol",
+            {
+                .L2 = new TriggerSetting (
+                        TriggerProfile::Galloping,
+                        {3, 9, 1, 2, 30}
+                ),
+                .R2 = new TriggerSetting (
+                        TriggerProfile::Bow,
+                        {1, 4, 3, 2}
+                )
+            }
+        },
+        {
+            "weapon/zion/player/sp/shotgun",
+            {
+                .L2 = new TriggerSetting (
+                        TriggerProfile::Choppy, {}
+                ),
+                .R2 = new TriggerSetting (
+                        TriggerProfile::Bow,
+                        {0, 4, 8, 8}
+                )
+            }
+        },
+        {
+            "weapon/zion/player/sp/shotgun_mod",
+            {
+                .L2 = new TriggerSetting (
+                        TriggerMode::Rigid, {}
+                ),
+                .R2 = new TriggerSetting (
+                        TriggerProfile::MultiplePositionFeeback,
+                        {4, 7, 0, 2, 4, 6, 0, 3, 6, 0}
+                )
+            }
+        },
+        {
+            "weapon/zion/player/sp/plasma_rifle",
+            {
+                .L2 = new TriggerSetting (
+                        TriggerProfile::Choppy, {}
+                ),
+                .R2 = new TriggerSetting (
+                        TriggerProfile::Vibration,
+                        {0, 4, 10}
+                )
+            }
+        },*/
+        {
+            "weapon/zion/player/sp/rocket_launcher",
+            {
+                .L2 = new TriggerSetting (
+                        TriggerProfile::Choppy, {}
+                ),
+                .R2 = new TriggerSetting (
+                        TriggerProfile::Bow,
+                        {0, 3, 8, 8}
+                )
+
+            }
+        },
+        {
+            "weapon/zion/player/sp/rocket_launcher_mod",
+            {
+                .L2 = new TriggerSetting (
+                        TriggerMode::Rigid, {}
+                ),
+                .R2 = new TriggerSetting (
+                        TriggerMode::Rigid_A,
+                        {209, 42, 232, 192, 232, 209, 232}
+                )
+            }
+        },
+        {
+            "weapon/zion/player/sp/chaingun",
+            {
+                .L2 = new TriggerSetting (
+                        TriggerProfile::Vibration,
+                        {1, 10, 8}
+                ),
+                .R2 = new TriggerSetting (
+                        TriggerProfile::MultiplePositionVibration,
+                        {11, 1, 3, 5, 7, 7, 8, 8, 8, 8, 8}
+                )
+            }
+        },
+        {
+            "weapon/zion/player/sp/chaingun_mod",
+            {
+                .L2 = new TriggerSetting (
+                        TriggerProfile::SlopeFeedback,
+                        {0, 5, 1, 8}
+                ),
+                .R2 = new TriggerSetting (
+                        TriggerProfile::MultiplePositionVibration,
+                        {21, 1, 3, 5, 7, 7, 8, 8, 8, 8, 8}
+                )
+            }
+        },
+        {
+            "weapon/zion/player/sp/gauss_rifle_mod",
+            {
+                .L2 = new TriggerSetting (
+                        TriggerProfile::Machine,
+                        {4, 9, 1, 2, 40, 0}
+                ),
+                .R2 = new TriggerSetting (
+                        TriggerProfile::Galloping,
+                        {1, 3, 1, 6, 40}
+                )
+            }
+        },
+#endif
+    };
+}
+
+
+void ResetAdaptiveTriggers() {
+    dualsensitive::setLeftTrigger(TriggerProfile::Normal);
+    dualsensitive::setRightTrigger(TriggerProfile::Normal);
+    _LOGD("Adaptive Triggers reset successfully!");
+}
+
+void ResetRightTrigger() {
+    dualsensitive::setRightTrigger(TriggerProfile::Normal);
+    _LOGD("Right Adaptive Trigger reset successfully!");
+}
+
+void ResetLeftTrigger() {
+    dualsensitive::setLeftTrigger(TriggerProfile::Normal);
+    _LOGD("Left Adaptive Trigger reset successfully!");
+}
+
+void NoAmmoAdaptiveTriggers() {
+    dualsensitive::setLeftTrigger(TriggerProfile::Normal);
+    dualsensitive::setRightTrigger(TriggerProfile::GameCube);
+    _LOGD("No Ammo Adaptive Triggers set successfully!");
+}
+
+
+void SendLeftTrigger() {
+    int weaponId = g_currWeaponId.load(std::memory_order_relaxed);
+    if (!g_HasAmmoInClip[ weaponId ])
+        return;
+    std::string weaponName = g_Weapons[ weaponId ];
+    Triggers t = g_TriggerSettings[ weaponName ];
+    if (t.L2->isCustomTrigger)
+        dualsensitive::setLeftCustomTrigger(t.L2->mode, t.L2->extras);
+    else
+        dualsensitive::setLeftTrigger (t.L2->profile, t.L2->extras);
+    _LOGD("Left Adaptive Trigger settings sent successfully!");
+}
+
+
+void SendRightTrigger() {
+    int weaponId = g_currWeaponId.load(std::memory_order_relaxed);
+    if (!g_HasAmmoInClip[ weaponId ])
+        return;
+    std::string weaponName = g_Weapons[ weaponId ];
+    Triggers t = g_TriggerSettings[ weaponName ];
+    if (t.R2->isCustomTrigger)
+        dualsensitive::setRightCustomTrigger(t.R2->mode, t.R2->extras);
+    else
+        dualsensitive::setRightTrigger (t.R2->profile, t.R2->extras);
+    _LOGD("Right Adaptive Trigger settings sent successfully!");
+}
+
+void SendTriggers() {
+    int weaponId = g_currWeaponId.load(std::memory_order_relaxed);
+    if (!g_HasAmmoInClip[ weaponId ])
+        return;
+    SendLeftTrigger();
+    SendRightTrigger();
+}
+
+
 // Kinesis FSM
 
 enum class KinesisState {
@@ -56,10 +400,12 @@ static std::atomic<KinesisState> g_kinesisState{KinesisState::Idle};
 static std::atomic<uint64_t> g_armTick{0};
 static std::atomic<bool> g_gameplayActive{true};
 
+
 static void EndKinesis(const char* reason) {
     if (g_kinesisState.exchange(KinesisState::Idle) != KinesisState::Idle) {
         _LOGD("Kinesis INACTIVE (%s)", reason);
     }
+    SendLeftTrigger();
 }
 
 // XInput hooking
@@ -183,9 +529,11 @@ DWORD WINAPI XInputGetState_Hook(DWORD dwUserIndex, XINPUT_STATE* pState)
 
             if (L2_isDown) {
                 _LOGD("[XInput] L2 DOWN (user=%u l2=%u)", dwUserIndex, l2);
+                SendRightTrigger();
             } else {
                 _LOGD("[XInput] L2 UP   (user=%u l2=%u)", dwUserIndex, l2);
                 EndKinesis("L2_UP");
+                ResetRightTrigger();
             }
         }
 
@@ -318,285 +666,6 @@ void logLastError(const char* context) {
     }
 }
 
-struct TriggerSetting {
-    TriggerProfile profile;
-    bool isCustomTrigger = false;
-    TriggerMode mode = TriggerMode::Off;
-    std::vector<uint8_t> extras;
-
-    TriggerSetting(TriggerProfile profile, std::vector<uint8_t> extras) :
-        profile(profile), extras(extras) {}
-
-    TriggerSetting(TriggerMode mode, std::vector<uint8_t> extras) :
-        mode(mode), extras(extras), isCustomTrigger(true) {}
-
-};
-
-struct Triggers {
-    TriggerSetting *L2;
-    TriggerSetting *R2;
-};
-
-// Globals
-Config g_config;
-Logger g_logger;
-
-std::map<std::string, Triggers> g_TriggerSettings ;
-
-void InitTriggerSettings() {
-    g_TriggerSettings =
-    {
-        {
-            "weapon/zion/player/sp/fists_berserk",
-            {
-
-                .L2 = new TriggerSetting (
-                        TriggerProfile::Choppy, {}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::Choppy, {}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/fists",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerProfile::Choppy, {}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::Choppy, {}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/pistol",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerProfile::Galloping,
-                        {3, 9, 1, 2, 30}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::Bow,
-                        {1, 4, 3, 2}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/shotgun",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerProfile::Choppy, {}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::Bow,
-                        {0, 4, 8, 8}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/shotgun_mod",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerMode::Rigid, {}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::MultiplePositionFeeback,
-                        {4, 7, 0, 2, 4, 6, 0, 3, 6, 0}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/plasma_rifle",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerProfile::Choppy, {}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::Vibration,
-                        {0, 4, 10}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/heavy_rifle_heavy_ar",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerMode::Rigid, {}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::MultiplePositionVibration,
-                        {14, 0, 1, 2, 3, 4, 5, 6, 7, 8, 8}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/heavy_rifle_heavy_ar_mod",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerMode::Rigid, {}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::MultiplePositionVibration,
-                        {15, 0, 1, 4, 6, 7, 8, 8, 7, 6, 4}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/rocket_launcher",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerProfile::Choppy, {}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::Bow,
-                        {0, 3, 8, 8}
-                )
-
-            }
-        },
-        {
-            "weapon/zion/player/sp/rocket_launcher_mod",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerMode::Rigid, {}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerMode::Rigid_A,
-                        {209, 42, 232, 192, 232, 209, 232}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/double_barrel",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerMode::Rigid_A,
-                        {60, 71, 56, 128, 195, 210, 255}
-                ),
-                .R2 = new TriggerSetting (
-                    TriggerProfile::SlopeFeedback,
-                    {0, 8, 8, 1}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/chaingun",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerProfile::Vibration,
-                        {1, 10, 8}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::MultiplePositionVibration,
-                        {11, 1, 3, 5, 7, 7, 8, 8, 8, 8, 8}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/chaingun_mod",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerProfile::SlopeFeedback,
-                        {0, 5, 1, 8}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::MultiplePositionVibration,
-                        {21, 1, 3, 5, 7, 7, 8, 8, 8, 8, 8}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/chainsaw",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerProfile::Machine,
-                        {1, 9, 1, 5, 100, 0}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::Machine,
-                        {1, 9, 7, 7, 65, 0}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/gauss_rifle",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerProfile::Machine,
-                        {7, 9, 0, 1, 8, 1}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::Galloping,
-                        {1, 3, 1, 6, 40}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/gauss_rifle_mod",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerProfile::Machine,
-                        {4, 9, 1, 2, 40, 0}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::Galloping,
-                        {1, 3, 1, 6, 40}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/bfg",
-            {
-                .L2 = new TriggerSetting (
-                    TriggerProfile::Choppy, {}
-                ),
-                .R2 = new TriggerSetting (
-                    TriggerMode::Pulse_AB,
-                    {18, 197, 35, 58, 90, 120, 138}
-                )
-            }
-        },
-    };
-}
-
-void SendTriggers(std::string weaponName) {
-    std::string weaponId = std::string(weaponName);
-    Triggers t = g_TriggerSettings[weaponId];
-    if (t.L2->isCustomTrigger)
-        dualsensitive::setLeftCustomTrigger(t.L2->mode, t.L2->extras);
-    else
-        dualsensitive::setLeftTrigger (t.L2->profile, t.L2->extras);
-    if (t.R2->isCustomTrigger)
-        dualsensitive::setRightCustomTrigger(t.R2->mode, t.R2->extras);
-    else
-        dualsensitive::setRightTrigger (t.R2->profile, t.R2->extras);
-    _LOGD("Adaptive Trigger settings sent successfully!");
-}
-
-
-// Game global vars
-
-HMODULE g_deadspaceBaseAddr = nullptr;
-static uintptr_t g_base = 0;
-
-// holds the id of the current weapon
-static std::atomic<int>  g_currWeaponId{-1};
-
-std::string g_Weapons[8] = {
-    "Plasma Cutter", // 0
-    "Pulse Rifle",   // 1
-    "Flamethrower",  // 2
-    "Force Gun",     // 3
-    "Line Gun",      // 4
-    "Ripper",        // 5
-    "Contact Beam",  // 6
-    "Hand Cannon"    // 7
-};
-
-bool g_HasAmmoInClip[8] = {
-    true
-};
 
 // Game functions
 
@@ -754,27 +823,6 @@ namespace DualsenseMod {
         return true;
     }
 
-    void resetAdaptiveTriggers() {
-        dualsensitive::setLeftTrigger(TriggerProfile::Normal);
-        dualsensitive::setRightTrigger(TriggerProfile::Normal);
-        _LOGD("Adaptive Triggers reset successfully!");
-    }
-
-    void noAmmoAdaptiveTriggers() {
-        dualsensitive::setLeftTrigger(TriggerProfile::Normal);
-        dualsensitive::setRightTrigger(TriggerProfile::GameCube);
-        _LOGD("No Ammo Adaptive Triggers set successfully!");
-    }
-
-    void sendAdaptiveTriggersForCurrentWeapon();
-    void sendAdaptiveTriggersForCurrentWeaponc(char *currWeaponName) {
-        _LOGD("* curr weapon: %s!", currWeaponName);
-        if (currWeaponName){
-            _LOGD("* Sending adaptive trigger setting!");
-            SendTriggers(currWeaponName);
-            return;
-        }
-    }
 
     // hooked functions
 
@@ -802,6 +850,7 @@ namespace DualsenseMod {
             if (g_kinesisState == KinesisState::Armed) {
                 uint64_t now = GetTickCount64();
                 if (now - g_armTick.load() <= ARM_WINDOW_MS) {
+                    ResetAdaptiveTriggers();
                     g_kinesisState.store(KinesisState::Active);
                     _LOGD("Kinesis ACTIVE (target npc_id=%s)", value ? value : "(null)");
                 }
@@ -826,6 +875,7 @@ namespace DualsenseMod {
             _LOGD("[ApplyWeaponState Hook] - switched to weapon: %s,  id: %d",
                 g_Weapons[weaponId].c_str(),  weaponId
             );
+            SendLeftTrigger();
         }
     }
 
@@ -860,6 +910,7 @@ namespace DualsenseMod {
         _LOGD("InterruptGame Hook - Game paused or entered in RIG inventory!");
         g_gameplayActive.store(false, std::memory_order_release);
         EndKinesis("gameplay paused");
+        ResetAdaptiveTriggers();
 
         InterruptGame_Original(param_1, param_2, param_3, param_4);
     }
@@ -868,6 +919,7 @@ namespace DualsenseMod {
     {
         _LOGD("ResumeGame Hook - Game is on again!");
         g_gameplayActive.store(true, std::memory_order_release);
+        SendLeftTrigger();
 
         ResumeGame_Original(param_1, param_2, param_3, param_4);
     }
@@ -992,17 +1044,21 @@ namespace DualsenseMod {
         _LOGD("UpdateAmmo Hook! used=%u clipSize=%u ammoLeft=%u emptyFlag=%d empty=%d",
               usedInClip, clipSize, ammoLeftInClip, isClipEmptyFlag ? 1 : 0, isClipEmpty ? 1 : 0);
 
-#if 0
+        int weaponId = g_currWeaponId.load(std::memory_order_relaxed);
         if (isClipEmpty) {
-            // Disable your DualSense mod here.
-            DisableDualSenseMod();
-            _LOGD("DualSense mod disabled: clip empty");
+            if (g_HasAmmoInClip [ weaponId ]) {
+                _LOGD("clip empty - disable triggers");
+                g_HasAmmoInClip [ weaponId ] = false;
+                ResetAdaptiveTriggers();
+            }
         } else {
             // Optional: re-enable when there is ammo in the clip again.
-            EnableDualSenseMod();
-            _LOGD("DualSense mod enabled: ammo available");
+            if (!g_HasAmmoInClip [ weaponId ]) {
+                _LOGD("clip has ammo again - enable triggers");
+                g_HasAmmoInClip [ weaponId ] = true;
+                SendLeftTrigger();
+            }
         }
-#endif
     }
 
     static uint32_t s_lastReloadTick = 0;
@@ -1032,7 +1088,9 @@ namespace DualsenseMod {
                s_lastReloadTick = now;
                s_lastReloadUsedBefore = beforeUsed;
                _LOGD("Reload detected");
-               // Re-enable DualSense here
+                int weaponId = g_currWeaponId.load(std::memory_order_relaxed);
+                g_HasAmmoInClip [ weaponId ] = true;
+                SendLeftTrigger();
             }
         }
     }
