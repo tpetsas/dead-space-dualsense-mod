@@ -113,7 +113,6 @@ static std::atomic<uint8_t> g_lastL2[4] = {0,0,0,0};
 static std::atomic<bool>    g_L2Down[4] = {false,false,false,false};
 static std::atomic<uint16_t> g_prevButtons[4] = {0,0,0,0};
 
-// Tune this
 static constexpr uint8_t L2_DOWN_THRESH = 30;   // press threshold
 static constexpr uint8_t L2_UP_THRESH   = 20;   // release threshold (hysteresis)
 
@@ -581,51 +580,29 @@ void SendTriggers(std::string weaponName) {
 HMODULE g_deadspaceBaseAddr = nullptr;
 static uintptr_t g_base = 0;
 
-std::vector<std::string> g_AmmoList = {
-    "bullets",  // heavy_rifle_heavy_ar, chaingun
-    "shells",   // shotgun, double_barrel
-    "rockets",  // rocket_launcher
-    "plasma",   // plasma_rifle, gauss_rifle
-    "cells",    // bfg
-    "fuel"      // chainsaw
+// holds the id of the current weapon
+static std::atomic<int>  g_currWeaponId{-1};
+
+std::string g_Weapons[8] = {
+    "Plasma Cutter", // 0
+    "Pulse Rifle",   // 1
+    "Flamethrower",  // 2
+    "Force Gun",     // 3
+    "Line Gun",      // 4
+    "Ripper",        // 5
+    "Contact Beam",  // 6
+    "Hand Cannon"    // 7
 };
 
-// weapon name to ammo
-static std::unordered_map<std::string, std::string> g_WeaponToAmmoType = {
-  {"weapon/zion/player/sp/fists",                    "infinite"},
-  {"weapon/zion/player/sp/fists_berserk",            "infinite"},
-  {"weapon/zion/player/sp/pistol",                   "infinite"},
-  {"weapon/zion/player/sp/heavy_rifle_heavy_ar",     "bullets"},
-  {"weapon/zion/player/sp/heavy_rifle_heavy_ar_mod", "bullets"},
-  {"weapon/zion/player/sp/chaingun",                 "bullets"},
-  {"weapon/zion/player/sp/chaingun_mod",             "bullets"},
-  {"weapon/zion/player/sp/shotgun",                  "shells"},
-  {"weapon/zion/player/sp/shotgun_mod",              "shells"},
-  {"weapon/zion/player/sp/double_barrel",            "shells"},
-  {"weapon/zion/player/sp/rocket_launcher",          "rockets"},
-  {"weapon/zion/player/sp/rocket_launcher_mod",      "rockets"},
-  {"weapon/zion/player/sp/plasma_rifle",             "plasma"},
-  {"weapon/zion/player/sp/gauss_rifle",              "plasma"},
-  {"weapon/zion/player/sp/gauss_rifle_mod",          "plasma"},
-  {"weapon/zion/player/sp/bfg",                      "cells"},
-  {"weapon/zion/player/sp/chainsaw",                 "fuel"},
+bool g_HasAmmoInClip[8] = {
+    true
 };
-
-
 
 // Game functions
-/*
-using _DispatchEvent =
-    void(__fastcall*)(
-            void* mgr, uint32_t eventId, uint32_t param2, uint8_t param3);
-*/
 
 using _WriteString = void(__fastcall*)(void* builder, const char *value, int64_t n);
 
 using _WriteKey = void(__fastcall*)(void* builder, const char *key, int64_t n);
-
-using _WeaponChange = void(__fastcall*)(int64_t p1, int p2);
-
 
 using _ApplyWeaponState = void(__fastcall*)(int64_t player, int64_t source,
         int64_t dest, int64_t secondarySource);
@@ -638,38 +615,35 @@ using  _InterruptGame = void(__fastcall*)(
 );
 
 using _ResumeGame = void(__fastcall*)(void* param_1, int param_2, int64_t param_3, int64_t param_4);
-//using _EnterKinesisState = void(__fastcall*)(void *self);
-using _EnterKinesisState = void(__fastcall*)(long long *param_1,long long *param_2
-        ,long long *param_3
-#if 0
-        , unsigned int param_4, void * param_5
-        , long long param_6
-        , void *param_7, void *param_8, void *param_9
-#endif
-);
-using _ExitKinesisState = void(__fastcall*)(void *self);
 
 using _EventDispatcher = bool(__fastcall*)(
     void* a1, void* a2, void* a3,
     uint64_t a4, uint64_t a5, uint32_t a6
 );
 
+using _UpdateAmmo = void(__fastcall*)(long long *param_1, int param_2);
+
+using _WeaponReload = void(__fastcall*)(long long* param_1, long long param_2);
+
 static inline int32_t ReadKinesisCounter(void* self) {
     return *(int32_t*)((uint8_t*)self + 0x4C); // <-- BYTE offset, 32-bit
 }
 
 
-
 // Game Addresses
 
-/*
-RVA<_DispatchEvent>
-DispatchEvent (
-"8b 11 45 0f b6 c8 48 8b 0d 53 e1 03 03 0f 28 d1 48 8b 01 48 ff 60 30"
-);
-_DispatchEvent DispatchEvent_Original = nullptr;
-*/
 
+RVA<_UpdateAmmo>
+UpdateAmmo (
+    "48 89 5c 24 10 48 89 6c 24 18 48 89 74 24 20 57 48 81 ec 80 00 00 00 48 8b 01"
+);
+_UpdateAmmo UpdateAmmo_Original = nullptr;
+
+RVA<_WeaponReload>
+WeaponReload (
+    "48 89 5C 24 08 48 89 6C 24 18 48 89 74 24 20 57 48 83 EC 60 8B 42 08"
+);
+_WeaponReload WeaponReload_Original = nullptr;
 
 RVA<_ApplyWeaponState>
 ApplyWeaponState (
@@ -686,31 +660,13 @@ WriteString (
 );
 _WriteString WriteString_Original = nullptr;
 
-//RVA<_EventHandler>
-//EventHandler (
-//    "48 89 5c 24 08 48 89 74 24 10 57 48 83 ec 20 49 8b d8 48 8b f2 48 8b f9 "
-//    "49 83 f8 ff 75 0b 66 90 48 ff c3 80 3c 1a 00 75 f7 e8 52 2e 00 00"
-//);
-//_EventHandler EventHandler_Original = nullptr;
-
 RVA<_WriteKey>
 WriteKey (
-"48 89 5c 24 08 48 89 74 24 10 57 48 83 ec 20 49 8b d8 48 8b f2 48 8b f9 49 83 "
-"f8 ff 75 0b 66 90 48 ff c3 80 3c 1a 00 75 f7 e8 52 2e 00 00 84 c0 74 5c 48 8b "
-"8f 28 02 00 00 48 85 c9"
+    "48 89 5c 24 08 48 89 74 24 10 57 48 83 ec 20 49 8b d8 48 8b f2 48 8b f9 "
+    "49 83 f8 ff 75 0b 66 90 48 ff c3 80 3c 1a 00 75 f7 e8 52 2e 00 00 84 c0 "
+    "74 5c 48 8b 8f 28 02 00 00 48 85 c9"
 );
 _WriteKey WriteKey_Original = nullptr;
-
-
-RVA<_WeaponChange>
-WeaponChange (
-        "48 89 5c 24 18 57 48 83 ec 20 44 0f b6 41 10 8b fa 48 8b 41 18 48 8b "
-        "d9 49 c1 e0 05 45 8b 4c 00 18 41 c1 e9 0e 41 f6 c1 01 0f 84 9e 00 00 "
-        "00 48 83 b9 78 12 00 00 00 0f 84 90 00 00 00 48 8b 81 20 11 00 00 48 "
-        "8d 54 24 30"
-);
-_WeaponChange WeaponChange_Original = nullptr;
-
 
 RVA<_InterruptGame>
 InterruptGame (
@@ -725,44 +681,13 @@ ResumeGame (
 );
 _ResumeGame ResumeGame_Original = nullptr;
 
-
-  //"48 89 5c 24 08 57 48 83 ec 20 48 8b 01 48 8b f9 48 8b 10 48 8b 5a 38 "
-  //"48 85 db 74 08 48 8b cb e8 ? ? ? ? ff 47 4c"
-RVA<_EnterKinesisState>
-EnterKinesisState (
-        "48 3b ca 0f 84 e2 00 00 00 55 57 48 83 ec 48 48 89 5c 24 70 49 8b f8 48 89 74 24 40 48 8d 59 10 4c 89 64 24 38 48 8b ea 4c 89 6c 24 30 4c 89 74 24 28 4c 89 7c 24 20 66 0f 1f 84 00 00 00 00 00"
-//        "48 89 5c 24 08 48 89 6c 24 10 48 89 74 24 18 57 48 83 ec 20 49 8b f9 49 8b f0 48 8b ea 48 8b d9 4d 85 c9 74 08 49 8b c9 e8 d3 f7 a7 00"
-        //"4c 8b dc 55 53 57 49 8d ab 18 fc ff ff 48 81 ec d0 04 00 00 48 8b 05 bd b5 4b 04 48 33 c4 48 89 85 b0 03 00 00 48 8b 1d 74 f2 50 04 49 8b f8"
-    //"48 8b c4 55 56 57 48 83 ec 70 48 89 58 e0 48 8b fa 4c 89 70 c8 bd 01 00 00 00 4c 89 78 c0 4c 8b f1"
-        //"48 89 5c 24 10 4c 89 4c 24 20 55 56 57 41 54 41 55 41 56 41 57 48 81 ec 80 00 00 00 48 8b 19 4c 8b e1 45 8b f8 4c 8b ea 48 89 9c 24 c0 00 00 00 8b 73 fc 0f ba f6 1f 48 c1 e6 06 48 03 f3"
-//"48 89 5c 24 10 48 89 6c 24 18 48 89 74 24 20 57 41 54 41 55 41 56 41 57 48 83 ec 20 48 8b 7a 10 48 8b d9 48 8b 02 8b 72 38"
-        //"48 89 5c 24 10 48 89 6c 24 18 48 89 74 24 20 57 41 54 41 55 41 56 41 57 48 83 ec 20 48 c7 41 10 00 00 00 00 48 8b d9 48 8b 7a 10 48 8b 02 8b 72 38 48 8b 6a 30 4c 8b 72 28 4c 8b 7a 20 4c 8b 62 18 4c 8b 6a 08 48 89 44 24 50 48 85 ff 74 08 48 8b cf e8 f9 29 a9 00"
-        //"40 53 41 56 48 83 ec 58 49 8b d8 4c 8b f2 48 3b ca 0f 84 f9 00 00 00 48 89 6c 24 50 48 89 74 24 48 48 8b f3"
-    //"48 89 5c 24 08 55 56 57 41 54 41 55 41 56 41 57 48 81 ec b0 00 00 00 4c 8b ac 24 10 01 00 00 4c 8b e2 45 8b f9 41 8b e8 45 3b c1 0f 84 9d 00 00 00"
-  //"85 d2 0f 84 ec 00 00 00 55 57 48 83 ec 58 48 89 5c 24 78 49 8b f8 48 89 74 24 50 48 8d 59 10"
-);
-_EnterKinesisState EnterKinesisState_Original = nullptr;
-
-
-RVA<_ExitKinesisState>
-ExitKinesisState (
-  "48 89 5c 24 08 57 48 83 ec 20 48 8b 01 48 8b f9 48 8b 10 48 8b 5a 38 "
-  "48 85 db 74 08 48 8b cb e8 ? ? ? ? ff 4f 4c"
-);
-_ExitKinesisState ExitKinesisState_Original = nullptr;
-
 RVA<_EventDispatcher>
 EventDispatcher (
-        "48 8b c4 48 89 58 10 48 89 70 18 48 89 78 20 55 41 54 41 55 41 56 41 57 48 8d 68 b1 48 81 ec f0 00 00 00 0f 57 c0 0f 29 70 c8 0f 11 44 24 40 45 33 ff"
+    "48 8b c4 48 89 58 10 48 89 70 18 48 89 78 20 55 41 54 41 55 41 56 41 57 "
+    "48 8d 68 b1 48 81 ec f0 00 00 00 0f 57 c0 0f 29 70 c8 0f 11 44 24 40 45 "
+    "33 ff"
 );
 _EventDispatcher EventDispatcher_Original = nullptr;
-
-
-// weapon switch dead space
-
-//void FUN_140848020(longlong param_1)
-
-//"48 89 5c 24 08 48 89 74 24 10 57 48 83 ec 20 48 8b b1 e8 01 00 00 48 8b de"
 
 
 // Globals
@@ -785,11 +710,6 @@ namespace DualsenseMod {
             WriteKey.GetUIntPtr()
         );
 
-        _LOG("WeaponChange at %p",
-            WeaponChange.GetUIntPtr()
-        );
-
-
         _LOG("ApplyWeaponState at %p",
             ApplyWeaponState.GetUIntPtr()
         );
@@ -799,33 +719,32 @@ namespace DualsenseMod {
             InterruptGame.GetUIntPtr()
         );
 
-
         _LOG("ResumeGame at %p",
             ResumeGame.GetUIntPtr()
-        );
-
-        _LOG("EnterKinesisState at %p",
-            EnterKinesisState.GetUIntPtr()
-        );
-
-        _LOG("ExitKinesisState at %p",
-            ExitKinesisState.GetUIntPtr()
         );
 
         _LOG("EventDispatcher at %p",
             EventDispatcher.GetUIntPtr()
         );
 
-        if (!WeaponChange       ||
+        _LOG("UpdateAmmo at %p",
+            UpdateAmmo.GetUIntPtr()
+        );
+
+        _LOG("WeaponReload at %p",
+            WeaponReload.GetUIntPtr()
+        );
+
+        if (
             !WriteString        ||
             !WriteKey           ||
             !ApplyWeaponState   ||
             !InterruptGame      ||
             !ResumeGame         ||
-            !EnterKinesisState  ||
-            !ExitKinesisState   ||
-            !EventDispatcher)
-            return false;
+            !EventDispatcher    ||
+            !UpdateAmmo         ||
+            !WeaponReload
+        ) return false;
 
         if (!g_deadspaceBaseAddr) {
             _LOGD("Dead Space (2023) base address is not set!");
@@ -840,7 +759,6 @@ namespace DualsenseMod {
         dualsensitive::setRightTrigger(TriggerProfile::Normal);
         _LOGD("Adaptive Triggers reset successfully!");
     }
-
 
     void noAmmoAdaptiveTriggers() {
         dualsensitive::setLeftTrigger(TriggerProfile::Normal);
@@ -857,461 +775,267 @@ namespace DualsenseMod {
             return;
         }
     }
-/*
-    uint64_t* DispatchEvent_Hook (uint64_t* node, const char* eventName,
-            uint16_t flags, int16_t priority) {
-        _LOGD("* DispatchEvent hook!!!");
 
-        uint64_t *ret = DispatchEvent_Original (
-                node, eventName, flags, priority
-        );
+    // hooked functions
 
-        if (eventName == nullptr) {
-            return ret;
-        }
-
-        _LOGD("Dead Space - DispatchEvent - event name: %s\n", eventName);
-        //sendAdaptiveTriggersForCurrentWeapon();
-        //DispatchEvent_Original(player, weapon);
-
-        return ret;
-    }
-*/
-
-#include <intrin.h>
-
-// helper functions
-static void* GetCaller() {
-    return _ReturnAddress();
-}
-
-static int ReadCurrentWeaponId(int64_t p1) {
-    if (!p1) return -1;
-    auto state = *(int64_t*)(p1 + 0x1278);
-    if (!state) return -1;
-    return *(int*)(state + 0x20);
-}
-
-static std::atomic<const char*> g_lastKeyAtomic{nullptr};
+    static std::atomic<const char*> g_lastKeyAtomic{nullptr};
 
 
-static inline uintptr_t RVA(void* p) { return (uintptr_t)p - g_base; }
-
-static inline void* Vtbl(void* obj) {
-    __try { return obj ? *(void**)obj : nullptr; }
-    __except(EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
-}
-
-void WriteKey_Hook (void* builder, const char *key, int64_t n) {
-    WriteKey_Original(builder, key, n);
-    if (key && (
-                //!strcmp(key,"ability_mode") || !strcmp(key,"status") ||
-                !strcmp(key, "npc_id"))) {
-        _LOGD("[WK] key=%s n=%lld ret=%p builder=%p", key, (long long)n, _ReturnAddress(), builder);
+    void WriteKey_Hook (void* builder, const char *key, int64_t n) {
+        WriteKey_Original(builder, key, n);
+        g_lastKeyAtomic.store(key, std::memory_order_relaxed);
     }
 
-    //_LOGD("WriteKey hook - key: %s", key);
-    //if (key && (strncmp(key, "is_", 3) == 0))
-    //    _LOGD("WriteKey hook - key: %s", key);
+    void WriteString_Hook (void* builder, const char *value, int64_t n) {
+        WriteString_Original(builder, value, n);
 
-    g_lastKeyAtomic.store(key, std::memory_order_relaxed);
-}
+        auto lastKey = g_lastKeyAtomic.load(std::memory_order_relaxed);
 
-static inline uint32_t Low12(void* p) {
-    return (uint32_t)((uintptr_t)p & 0xFFF);
-}
+        //!strcmp(lastKey,"ability_mode") || !strcmp(lastKey,"status") ||
 
-void WriteString_Hook (void* builder, const char *value, int64_t n) {
-    void* ret = _ReturnAddress();
-    void* vt  = Vtbl(builder);
-    WriteString_Original(builder, value, n);
+        if (lastKey && (!strcmp(lastKey, "npc_id"))) {
+            //_LOGD("[WS] key=%s value='%s'",
+            //      lastKey, value ? value : "(null)");
 
-    auto lastKey = g_lastKeyAtomic.load(std::memory_order_relaxed);
-
-    if (lastKey && (
-                //!strcmp(lastKey,"ability_mode") || !strcmp(lastKey,"status") ||
-                !strcmp(lastKey, "npc_id"))) {
-        _LOGD("[WS] key=%s value='%s' n=%lld ret=%p builder=%p Low12(builder)=0x%03X vtbl=%p vtbl_rva=0x%llX",
-              lastKey, value ? value : "(null)", (long long)n, _ReturnAddress(), builder, Low12(builder), vt, vt ? (unsigned long long)RVA(vt) : 0ULL);
-
-        // Enter Kinesis state if kinesis in armed state and
-        // target npc id is found
-        if (g_kinesisState == KinesisState::Armed) {
-            uint64_t now = GetTickCount64();
-            if (now - g_armTick.load() <= ARM_WINDOW_MS) {
-                g_kinesisState.store(KinesisState::Active);
-                _LOGD("Kinesis ACTIVE (target npc_id=%s)", value ? value : "(null)");
+            // Enter Kinesis state if kinesis in armed state and
+            // target npc id is found
+            if (g_kinesisState == KinesisState::Armed) {
+                uint64_t now = GetTickCount64();
+                if (now - g_armTick.load() <= ARM_WINDOW_MS) {
+                    g_kinesisState.store(KinesisState::Active);
+                    _LOGD("Kinesis ACTIVE (target npc_id=%s)", value ? value : "(null)");
+                }
             }
         }
+
     }
 
-}
+    void ApplyWeaponState_Hook(int64_t player, int64_t source,
+                               int64_t dest, int64_t secondarySource)
+    {
 
-/*
-static void Dump32(const char* tag, uint8_t* p, int off)
-{
-    if (!p) return;
-    uint32_t v0 = *(uint32_t*)(p + off);
-    uint32_t v1 = *(uint32_t*)(p + off + 4);
-    uint32_t v2 = *(uint32_t*)(p + off + 8);
-    uint32_t v3 = *(uint32_t*)(p + off + 12);
-    _LOGD("%s +%X: %08X %08X %08X %08X", tag, off, v0, v1, v2, v3);
-}
+        uint8_t* out = dest ? *(uint8_t**)(dest + 0x18) : nullptr;
 
-void ApplyWeaponState_Hook(int64_t player, int64_t source,
-                           int64_t dest, int64_t secondarySource)
-{
-    uint8_t* out = dest ? *(uint8_t**)(dest + 0x18) : nullptr;
+        ApplyWeaponState_Original(player, source, dest, secondarySource);
 
-    ApplyWeaponState_Original(player, source, dest, secondarySource);
+        int weaponId = *(int*)(out + 0x4E4);
+        if (weaponId < 0 || weaponId > 7) return;
 
-    if (!out) return;
-
-    static uint64_t lastTick = 0;
-    uint64_t now = GetTickCount64();
-    if (now - lastTick > 1000) {
-        lastTick = now;
-        Dump32("[AWS]", out, 0x4C0);
-        Dump32("[AWS]", out, 0x4D0);
-        Dump32("[AWS]", out, 0x4E0);
-        Dump32("[AWS]", out, 0x4E4); // yes, small overlap is fine
-    }
-}
-*/
-
-
-static void DumpU32(uint8_t* p, int off) {
-    uint32_t v = *(uint32_t*)(p + off);
-    _LOGD("[AWS] +%03X = %08X (%d)", off, v, (int32_t)v);
-}
-
-static std::atomic<int>  g_lastWeaponId{-1};
-
-void ApplyWeaponState_Hook(int64_t player, int64_t source,
-                           int64_t dest, int64_t secondarySource)
-{
-
-    uint8_t* out = dest ? *(uint8_t**)(dest + 0x18) : nullptr;
-
-    ApplyWeaponState_Original(player, source, dest, secondarySource);
-
-    if (!out) return;
-
-    // only dump once every ~250ms so it’s responsive but not insane!
-    static uint64_t lastTick = 0;
-    uint64_t now = GetTickCount64();
-    if (now - lastTick < 250) return;
-    lastTick = now;
-
-    // weapon offest: 0x4E4
-    int weaponId = *(int*)(out + 0x4E4);
-
-    if (weaponId < 0 || weaponId > 100)
-        return;
-
-    int prev = g_lastWeaponId.exchange(weaponId);
-    if (prev != weaponId) {
-        _LOGD("[ApplyWeaponState Hook] current weapon id: %d", weaponId);
-    }
-
-#if 0
-    // Scan around the area you think matters
-    DumpU32(out_before, 0x4C0);
-    DumpU32(out_before, 0x4CC);
-    DumpU32(out_before, 0x4D0);
-    DumpU32(out_before, 0x4D4);
-    DumpU32(out_before, 0x4DC);
-    DumpU32(out_before, 0x4E0);
-    DumpU32(out_before, 0x4E4);
-    DumpU32(out_before, 0x4E8);
-#endif
-}
-
-void WeaponChange_Hook (int64_t p1, int p2) {
-    WeaponChange_Original(p1, p2);
-
-    int cur = ReadCurrentWeaponId(p1);
-    if (cur < 0) return;
-
-    // weapon changed: p2 is new weapon
-    // set DualSense trigger profile here
-    _LOGD("WeaponChange: p2: %d", p2);
-    _LOGD("WeaponChange: cur: %d", cur);
-}
-
-static const char* TryGetCString(uint64_t p)
-{
-    if (!p) return nullptr;
-
-    __try {
-        // First assume p is directly a C-string
-        const char* s = (const char*)p;
-
-        // Very cheap sanity: must be readable and NUL-terminated “soon-ish”
-        for (int i = 0; i < 256; i++) {
-            char c = s[i];
-            if (c == '\0') return s;
-            // optional: reject totally weird bytes early
-            if ((unsigned char)c < 0x09) return nullptr;
-        }
-
-        // If not NUL-terminated quickly, maybe p is pointer-to-pointer
-        const char* s2 = *(const char**)p;
-        if (!s2) return nullptr;
-
-        for (int i = 0; i < 256; i++) {
-            char c = s2[i];
-            if (c == '\0') return s2;
-            if ((unsigned char)c < 0x09) return nullptr;
-        }
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER) {
-        return nullptr;
-    }
-
-    return nullptr;
-}
-
-
-static std::atomic<int32_t> g_lastEvent{0};
-
-static const char* SafeNameFromEvt(int64_t evt) {
-    __try {
-        int64_t p = *(int64_t*)(evt + 0x30);
-        if (!p) return nullptr;
-        const char* s = *(const char**)(p + 0x10);
-        if (!s) return nullptr;
-        // sanity: avoid garbage pointers / non-terminated strings
-        for (int i = 0; i < 128; i++) {
-            char c = s[i];
-            if (c == '\0') return s;
-            if ((unsigned char)c < 0x09) return nullptr;
-        }
-        return nullptr;
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        return nullptr;
-    }
-}
-
-using  _InterruptGame = void(__fastcall*)(
-    void*   param_1,   // RCX
-    int     param_2,   // EDX
-    int64_t param_3,   // R8
-    void*   param_4    // R9   (was longlong* in decompile; treat as opaque pointer)
-);
-void __fastcall InterruptGame_Hook(void *param_1, int param_2, int64_t param_3, void *param_4)
-{
-    _LOGD("InterruptGame Hook - Game paused or entered in RIG inventory!");
-    g_gameplayActive.store(false, std::memory_order_release);
-    EndKinesis("gameplay paused");
-
-    InterruptGame_Original(param_1, param_2, param_3, param_4);
-}
-
-
-void __fastcall ResumeGame_Hook (void* param_1, int param_2, int64_t param_3, int64_t param_4)
-{
-    _LOGD("ResumeGame Hook - Game is on again!");
-    g_gameplayActive.store(true, std::memory_order_release);
-
-    ResumeGame_Original(param_1, param_2, param_3, param_4);
-}
-
-static inline uintptr_t addrToRVA(void* p) {
-    return reinterpret_cast<uintptr_t>(p) - g_base;
-}
-static bool IsInterestingEnter(void* ret) {
-    return addrToRVA(ret) == 0x93B45B;
-}
-static bool IsInterestingExit(void* ret) {
-    return addrToRVA(ret) == 0x93F29B;
-}
-
-static std::atomic<bool> g_kinesisActive{false};
-
-//void __fastcall EnterKinesisState_Hook (void *self)
-void __fastcall EnterKinesisState_Hook (long long *param_1,long long *param_2
-        ,long long *param_3
-#if 0
-        ,
-    unsigned int param_4, void * param_5
-    , long long param_6
-        , void *param_7, void *param_8, void *param_9
-#endif
-        )
-{
-    //EnterKinesisState_Original(self);
-    EnterKinesisState_Original(param_1, param_2
-            , param_3
-#if 0
-            ,
-        param_4, param_5
-        , param_6
-
-        , param_7, param_8, param_9
-#endif
+        int prev = g_currWeaponId.exchange(weaponId);
+        if (prev != weaponId) {
+            _LOGD("[ApplyWeaponState Hook] - switched to weapon: %s,  id: %d",
+                g_Weapons[weaponId].c_str(),  weaponId
             );
-
-    //g_kinesisActive.store(true, std::memory_order_release);
-    _LOGD("Kinesis ACTIVE!");
-
-}
-
-
-void __fastcall ExitKinesisState_Hook (void *self)
-{
-    void* caller = _ReturnAddress();
-    int32_t before = ReadKinesisCounter(self);
-    ExitKinesisState_Original(self);
-    int32_t after = ReadKinesisCounter(self);
-
-     if (!(before == 1 && after == 0))
-        return;
-
-    if (!IsInterestingExit(caller))
-        return;
-
-    g_kinesisActive.store(false, std::memory_order_release);
-    _LOGD("Kinesis INACTIVE (counter %d -> %d, self=%p, caller=%p)", before, after, self, caller);
-
-}
-
-static const char* TryGetEventNameFromArg(uint64_t a)
-{
-    // 1) a is directly a char*
-    if (auto s = TryGetCString(a)) return s;
-
-    // 2) a is pointer to something, first qword is char*
-    __try {
-        uint64_t p0 = *(uint64_t*)a;
-        if (auto s = TryGetCString(p0)) return s;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {}
-
-    // 3) common “string object” layouts: char* at +8 or +0x10
-    __try {
-        uint64_t p8 = *(uint64_t*)(a + 8);
-        if (auto s = TryGetCString(p8)) return s;
-
-        uint64_t p10 = *(uint64_t*)(a + 0x10);
-        if (auto s = TryGetCString(p10)) return s;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {}
-
-    return nullptr;
-}
-
-static inline bool IsCanonicalUserPtr(uint64_t p) {
-    // Typical user-mode canonical range on Windows x64
-    return (p >= 0x0000000000010000ULL) && (p <= 0x00007FFFFFFFFFFFULL);
-}
-
-static const char* TryAsciiAt(uint64_t p) {
-    if (!IsCanonicalUserPtr(p)) return nullptr;
-    __try {
-        auto s = (const char*)p;
-        // require first char printable-ish
-        unsigned char c0 = (unsigned char)s[0];
-        if (c0 == 0) return nullptr;
-        if (c0 < 0x20 || c0 > 0x7E) return nullptr;
-
-        for (int i = 0; i < 128; i++) {
-            unsigned char c = (unsigned char)s[i];
-            if (c == 0) return s;
-            if (c < 0x20 || c > 0x7E) return nullptr;
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {}
-    return nullptr;
-}
-
-static const char* TryStringObject(uint64_t a) {
-    // Try direct
-    if (auto s = TryAsciiAt(a)) return s;
-
-    if (!IsCanonicalUserPtr(a)) return nullptr;
-
-    __try {
-        // Try common layouts: [0]=char*, [1]=char*, at +0x10, +0x18, etc
-        uint64_t q0 = *(uint64_t*)(a + 0x00);
-        uint64_t q8 = *(uint64_t*)(a + 0x08);
-        uint64_t q10 = *(uint64_t*)(a + 0x10);
-        uint64_t q18 = *(uint64_t*)(a + 0x18);
-
-        if (auto s = TryAsciiAt(q0)) return s;
-        if (auto s = TryAsciiAt(q8)) return s;
-        if (auto s = TryAsciiAt(q10)) return s;
-        if (auto s = TryAsciiAt(q18)) return s;
-
-        // Sometimes: pointer-to-pointer
-        if (IsCanonicalUserPtr(q0)) {
-            uint64_t qq0 = *(uint64_t*)q0;
-            if (auto s = TryAsciiAt(qq0)) return s;
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {}
-
-    return nullptr;
-}
-
-static void DumpQwords(const char* tag, uint64_t p) {
-    if (!IsCanonicalUserPtr(p)) return;
-    __try {
-        uint64_t q0 = *(uint64_t*)(p + 0x00);
-        uint64_t q8 = *(uint64_t*)(p + 0x08);
-        uint64_t q10 = *(uint64_t*)(p + 0x10);
-        uint64_t q18 = *(uint64_t*)(p + 0x18);
-        _LOGD("%s %p: [%016llX %016llX %016llX %016llX]", tag, (void*)p, q0, q8, q10, q18);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {}
-}
-
-bool EventDispatcher_Hook(
-    void* a1, void* a2, void* a3,
-    uint64_t a4, uint64_t a5, uint32_t a6
-){
-    void* ret = _ReturnAddress();
-
-    const char* eventName = TryStringObject(a4);
-    const char* s5 = TryStringObject(a5);
-    const char* s3 = TryStringObject((uint64_t)a3);
-
-    if (eventName && !strcmp(eventName, "KinesisThrow")) {
-        if (g_kinesisState.load() != KinesisState::Idle) {
-            _LOGD("Kinesis Throw...");
-            EndKinesis("Throw");
         }
     }
 
-    return EventDispatcher_Original(a1, a2, a3, a4, a5, a6);
-}
-/*
-unsigned long long SelectWeaponByDeclExplicit_Hook(long long *player,
-                            long long decl, char param_3, char param_4) {
-    _LOGD("* idPlayer::SelectWeaponByDeclExplicit hook!!!");
+    static std::atomic<int32_t> g_lastEvent{0};
 
-    Weapon *weapon = nullptr;
-    if (long long *mgr = (long long *) GetWeaponMgr(player)) {
-        weapon = (Weapon *)GetWeaponFromDecl(mgr, decl);
-        if (weapon) {
-            const char* name = GetWeaponName (
-                    reinterpret_cast<long long*>(weapon)
-            );
-            if (name && name[0]) {
-                _LOGD("* (init) curr weapon: %s", name);
+    static const char* SafeNameFromEvt(int64_t evt) {
+        __try {
+            int64_t p = *(int64_t*)(evt + 0x30);
+            if (!p) return nullptr;
+            const char* s = *(const char**)(p + 0x10);
+            if (!s) return nullptr;
+            // sanity: avoid garbage pointers / non-terminated strings
+            for (int i = 0; i < 128; i++) {
+                char c = s[i];
+                if (c == '\0') return s;
+                if ((unsigned char)c < 0x09) return nullptr;
             }
-            g_currWeapon = weapon;
+            return nullptr;
+        } __except(EXCEPTION_EXECUTE_HANDLER) {
+            return nullptr;
         }
     }
-    unsigned long long ret = SelectWeaponByDeclExplicit_Original (
-            player, decl, param_3, param_4
+
+    using  _InterruptGame = void(__fastcall*)(
+        void*   param_1,   // RCX
+        int     param_2,   // EDX
+        int64_t param_3,   // R8
+        void*   param_4    // R9   (was longlong* in decompile; treat as opaque pointer)
     );
+    void __fastcall InterruptGame_Hook(void *param_1, int param_2, int64_t param_3, void *param_4)
+    {
+        _LOGD("InterruptGame Hook - Game paused or entered in RIG inventory!");
+        g_gameplayActive.store(false, std::memory_order_release);
+        EndKinesis("gameplay paused");
 
-    // reset player here (paused used for loading the latest checkpoint
-    // from the main menu)
-    if (g_currPlayer && (g_state == GameState::Idle ||
-                g_state == GameState::Paused)) {
-        g_state.store(GameState::Idle, std::memory_order_release);
-        g_currPlayer = nullptr;
+        InterruptGame_Original(param_1, param_2, param_3, param_4);
     }
-    return ret;
-}
-*/
+
+    void __fastcall ResumeGame_Hook (void* param_1, int param_2, int64_t param_3, int64_t param_4)
+    {
+        _LOGD("ResumeGame Hook - Game is on again!");
+        g_gameplayActive.store(true, std::memory_order_release);
+
+        ResumeGame_Original(param_1, param_2, param_3, param_4);
+    }
+
+    static std::atomic<bool> g_kinesisActive{false};
+
+    static inline bool IsCanonicalUserPtr(uint64_t p) {
+        // Typical user-mode canonical range on Windows x64
+        return (p >= 0x0000000000010000ULL) &&
+            (p <= 0x00007FFFFFFFFFFFULL);
+    }
+
+    static const char* TryAsciiAt(uint64_t p) {
+        if (!IsCanonicalUserPtr(p)) return nullptr;
+        __try {
+            auto s = (const char*)p;
+            // require first char printable-ish
+            unsigned char c0 = (unsigned char)s[0];
+            if (c0 == 0) return nullptr;
+            if (c0 < 0x20 || c0 > 0x7E) return nullptr;
+
+            for (int i = 0; i < 128; i++) {
+                unsigned char c = (unsigned char)s[i];
+                if (c == 0) return s;
+                if (c < 0x20 || c > 0x7E) return nullptr;
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        return nullptr;
+    }
+
+    static const char* TryStringObject(uint64_t a) {
+        // try direct
+        if (auto s = TryAsciiAt(a)) return s;
+
+        if (!IsCanonicalUserPtr(a)) return nullptr;
+
+        __try {
+            // try common layouts:
+            // [0]=char*, [1]=char*, at +0x10, +0x18, etc
+            uint64_t q0 = *(uint64_t*)(a + 0x00);
+            uint64_t q8 = *(uint64_t*)(a + 0x08);
+            uint64_t q10 = *(uint64_t*)(a + 0x10);
+            uint64_t q18 = *(uint64_t*)(a + 0x18);
+
+            if (auto s = TryAsciiAt(q0)) return s;
+            if (auto s = TryAsciiAt(q8)) return s;
+            if (auto s = TryAsciiAt(q10)) return s;
+            if (auto s = TryAsciiAt(q18)) return s;
+
+            // pointer-to-pointer
+            if (IsCanonicalUserPtr(q0)) {
+                uint64_t qq0 = *(uint64_t*)q0;
+                if (auto s = TryAsciiAt(qq0)) return s;
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+        return nullptr;
+    }
+
+    bool EventDispatcher_Hook(
+        void* a1, void* a2, void* a3,
+        uint64_t a4, uint64_t a5, uint32_t a6
+    ){
+        const char* eventName = TryStringObject(a4);
+
+        if (eventName && (
+                !strcmp(eventName, "KinesisThrow") ||
+                !strcmp(eventName, "ApplyDamageAction"))
+        ) {
+            if (g_kinesisState.load() != KinesisState::Idle) {
+                _LOGD("Kinesis Throw...");
+                EndKinesis("Throw");
+            }
+        }
+
+        return EventDispatcher_Original(a1, a2, a3, a4, a5, a6);
+    }
+
+    void UpdateAmmo_Hook(long long* param_1, int param_2)
+    {
+        _LOGD("UpdateAmmo Hook!");
+
+        // Let the game update its internal ammo state first.
+        UpdateAmmo_Original(param_1, param_2);
+
+        if (!g_gameplayActive)
+            return;
+
+        if (param_1 == nullptr) {
+            _LOGD("UpdateAmmo Hook! invalid param_1");
+            return;
+        }
+
+        _LOGD("Ammo object ptr: %p", param_1);
+        _LOGD("usedInClip addr: %p", (void*)((uintptr_t)param_1 + 0x3c));
+
+        // This field appears to be "ammo used in current clip", not ammo remaining.
+        unsigned int usedInClip = *(unsigned int *)((char*)param_1 + 0x3c);
+
+        // vfunc at +0xD0 appears to return clip size / max count for this weapon.
+        using GetClipSizeFn = unsigned int(__fastcall*)(long long*);
+        GetClipSizeFn GetClipSize = *(GetClipSizeFn*)(*(long long*)param_1 + 0xD0);
+
+        unsigned int clipSize = 0;
+        if (GetClipSize) {
+            clipSize = GetClipSize(param_1);
+        }
+
+        // Clamp defensively in case the internal state is odd during transitions.
+        if (usedInClip > clipSize) {
+            usedInClip = clipSize;
+        }
+
+        unsigned int ammoLeftInClip = (clipSize >= usedInClip) ? (clipSize - usedInClip) : 0;
+
+        // The game also appears to store an "empty clip" bool at +0x48.
+        bool isClipEmptyFlag = *(bool *)((char*)param_1 + 0x48);
+
+        // Reliable empty check.
+        bool isClipEmpty = (clipSize > 0) ? (usedInClip >= clipSize) : isClipEmptyFlag;
+
+        _LOGD("UpdateAmmo Hook! used=%u clipSize=%u ammoLeft=%u emptyFlag=%d empty=%d",
+              usedInClip, clipSize, ammoLeftInClip, isClipEmptyFlag ? 1 : 0, isClipEmpty ? 1 : 0);
+
+#if 0
+        if (isClipEmpty) {
+            // Disable your DualSense mod here.
+            DisableDualSenseMod();
+            _LOGD("DualSense mod disabled: clip empty");
+        } else {
+            // Optional: re-enable when there is ammo in the clip again.
+            EnableDualSenseMod();
+            _LOGD("DualSense mod enabled: ammo available");
+        }
+#endif
+    }
+
+    static uint32_t s_lastReloadTick = 0;
+    static uint32_t s_lastReloadUsedBefore = 0;
+
+    void WeaponReload_Hook(long long* param_1, long long param_2)
+    {
+        if (!param_1 || !param_2) {
+            WeaponReload_Original(param_1, param_2);
+            return;
+        }
+
+        int eventType = *(int*)((char*)param_2 + 0x8);
+
+        unsigned int beforeUsed = *(unsigned int*)((char*)param_1 + 0x3c);
+
+        WeaponReload_Original(param_1, param_2);
+
+        unsigned int afterUsed = *(unsigned int*)((char*)param_1 + 0x3c);
+        bool emptyFlag = *(bool*)((char*)param_1 + 0x48);
+
+
+        uint32_t now = GetTickCount();
+
+        if (eventType == 0x13 && afterUsed < beforeUsed) {
+            if (!(now - s_lastReloadTick < 100 && s_lastReloadUsedBefore == beforeUsed)) {
+               s_lastReloadTick = now;
+               s_lastReloadUsedBefore = beforeUsed;
+               _LOGD("Reload detected");
+               // Re-enable DualSense here
+            }
+        }
+    }
 
     bool ApplyHooks() {
         _LOG("Applying hooks...");
@@ -1339,17 +1063,6 @@ unsigned long long SelectWeaponByDeclExplicit_Hook(long long *player,
         }
 
         MH_CreateHook (
-            WeaponChange,
-            WeaponChange_Hook,
-            reinterpret_cast<LPVOID *>(&WeaponChange_Original)
-        );
-        if (MH_EnableHook(WeaponChange) != MH_OK) {
-            _LOG("FATAL: Failed to install WeaponChange hook.");
-            return false;
-        }
-
-
-        MH_CreateHook (
             ApplyWeaponState,
             ApplyWeaponState_Hook,
             reinterpret_cast<LPVOID *>(&ApplyWeaponState_Original)
@@ -1358,7 +1071,6 @@ unsigned long long SelectWeaponByDeclExplicit_Hook(long long *player,
             _LOG("FATAL: Failed to install ApplyWeaponState hook.");
             return false;
         }
-
 
         MH_CreateHook (
             InterruptGame,
@@ -1380,27 +1092,7 @@ unsigned long long SelectWeaponByDeclExplicit_Hook(long long *player,
             _LOG("FATAL: Failed to install ResumeGame hook.");
             return false;
         }
-#if 0
-        MH_CreateHook (
-            EnterKinesisState,
-            EnterKinesisState_Hook,
-            reinterpret_cast<LPVOID *>(&EnterKinesisState_Original)
-        );
-        if (MH_EnableHook(EnterKinesisState) != MH_OK) {
-            _LOG("FATAL: Failed to install EnterKinesisState hook.");
-            return false;
-        }
 
-        MH_CreateHook (
-            ExitKinesisState,
-            ExitKinesisState_Hook,
-            reinterpret_cast<LPVOID *>(&ExitKinesisState_Original)
-        );
-        if (MH_EnableHook(ExitKinesisState) != MH_OK) {
-            _LOG("FATAL: Failed to install ExitKinesisState hook.");
-            return false;
-        }
-#endif
         MH_CreateHook (
             EventDispatcher,
             EventDispatcher_Hook,
@@ -1411,9 +1103,28 @@ unsigned long long SelectWeaponByDeclExplicit_Hook(long long *player,
             return false;
         }
 
+        MH_CreateHook (
+            UpdateAmmo,
+            UpdateAmmo_Hook,
+            reinterpret_cast<LPVOID *>(&UpdateAmmo_Original)
+        );
+        if (MH_EnableHook(UpdateAmmo) != MH_OK) {
+            _LOG("FATAL: Failed to install UpdateAmmo hook.");
+            return false;
+        }
+
+        MH_CreateHook (
+            WeaponReload,
+            WeaponReload_Hook,
+            reinterpret_cast<LPVOID *>(&WeaponReload_Original)
+        );
+        if (MH_EnableHook(WeaponReload) != MH_OK) {
+            _LOG("FATAL: Failed to install WeaponReload hook.");
+            return false;
+        }
+
         if (!HookXInputGetState()) {
             _LOG("WARNING: Failed to hook XInputGetState (continuing).");
-            // You can return false if you want it mandatory
             return false;
         }
 
@@ -1486,7 +1197,6 @@ std::string wstring_to_utf8(const std::wstring& ws) {
         g_config.print();
 
         InitTriggerSettings();
-
         if (!ApplyHooks()) {
             MessageBoxA (
                 NULL,
