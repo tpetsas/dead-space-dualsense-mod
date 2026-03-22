@@ -104,11 +104,6 @@ void InitTriggerSettings() {
                 .L2 = new TriggerSetting (
                         TriggerProfile::Choppy, {}
                 ),
-                /*
-                .R2 = new TriggerSetting (
-                        TriggerProfile::Bow,
-                        {1, 4, 3, 2}
-                )*/
                 .R2 = new TriggerSetting(TriggerProfile::Soft, {})
             }
         },
@@ -121,8 +116,6 @@ void InitTriggerSettings() {
                 .R2 = new TriggerSetting (
                         TriggerProfile::Galloping,
                         {2, 9, 1, 2, 80}
-                        //{3, 9, 1, 2, 80}
-                        //{1, 3, 1, 6, 40}
                 )
             }
         },
@@ -134,9 +127,7 @@ void InitTriggerSettings() {
                 ),
                 .R2 = new TriggerSetting (
                         TriggerProfile::MultiplePositionVibration,
-                        //{14, 0, 1, 2, 3, 4, 5, 6, 7, 8, 8}
-                        //{15, 0, 1, 4, 6, 7, 8, 8, 7, 6, 4}
-                        {14, 0, 1, 2, 3, 4, 5, 6, 7, 7, 7}
+                        {14, 0, 1, 2, 3, 4, 5, 6, 7, 7, 8}
                 )
             }
         },
@@ -184,9 +175,6 @@ void InitTriggerSettings() {
                 .L2 = new TriggerSetting (
                         TriggerProfile::Machine,
                         {1, 9, 7, 7, 75, 0}
-                        //{1, 9, 5, 6, 75, 0}
-                        //{1, 9, 7, 7, 65, 0}
-                        //{1, 9, 5, 6, 75, 0}
                 ),
                 .R2 = new TriggerSetting (
                         TriggerMode::Pulse_B,
@@ -195,7 +183,7 @@ void InitTriggerSettings() {
             }
         },
         {
-            "Contact Beam", //"weapon/zion/player/sp/gauss_rifle",
+            "Contact Beam",
             {
                 .L2 = new TriggerSetting (
                         TriggerProfile::Machine,
@@ -208,7 +196,7 @@ void InitTriggerSettings() {
             }
         },
         {
-            "ContactBeamActive", //"weapon/zion/player/sp/gauss_rifle",
+            "ContactBeamActive",
             {
                 .L2 = new TriggerSetting (
                         TriggerProfile::Machine,
@@ -218,16 +206,6 @@ void InitTriggerSettings() {
                         TriggerMode::Pulse_B,
                         {109, 54, 66, 80, 43, 80, 80}
                 )
-
-#if 0
-                .R2 = new TriggerSetting (
-
-                    TriggerMode::Pulse_AB,
-                    {18, 197, 35, 58, 90, 120, 138}
-                    //    TriggerProfile::Galloping,
-                     //   {1, 3, 1, 6, 40}
-                )
-#endif
             }
         },
         {
@@ -236,132 +214,11 @@ void InitTriggerSettings() {
                 .L2 = new TriggerSetting (
                     TriggerProfile::Resistance, {8,1}
                 ),
-                /*.R2 = new TriggerSetting (
-                    TriggerMode::Pulse_AB,
-                    {18, 197, 35, 58, 90, 120, 138}
-                    */
-
                 .R2 = new TriggerSetting (
                     TriggerProfile::Resistance, {2, 1}
                 ),
             }
         },
-#if 0
-        /*
-           {
-            "weapon/zion/player/sp/pistol",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerProfile::Galloping,
-                        {3, 9, 1, 2, 30}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::Bow,
-                        {1, 4, 3, 2}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/shotgun",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerProfile::Choppy, {}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::Bow,
-                        {0, 4, 8, 8}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/shotgun_mod",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerMode::Rigid, {}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::MultiplePositionFeeback,
-                        {4, 7, 0, 2, 4, 6, 0, 3, 6, 0}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/plasma_rifle",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerProfile::Choppy, {}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::Vibration,
-                        {0, 4, 10}
-                )
-            }
-        },*/
-        {
-            "weapon/zion/player/sp/rocket_launcher",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerProfile::Choppy, {}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::Bow,
-                        {0, 3, 8, 8}
-                )
-
-            }
-        },
-        {
-            "weapon/zion/player/sp/rocket_launcher_mod",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerMode::Rigid, {}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerMode::Rigid_A,
-                        {209, 42, 232, 192, 232, 209, 232}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/chaingun",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerProfile::Vibration,
-                        {1, 10, 8}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::MultiplePositionVibration,
-                        {11, 1, 3, 5, 7, 7, 8, 8, 8, 8, 8}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/chaingun_mod",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerProfile::SlopeFeedback,
-                        {0, 5, 1, 8}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::MultiplePositionVibration,
-                        {21, 1, 3, 5, 7, 7, 8, 8, 8, 8, 8}
-                )
-            }
-        },
-        {
-            "weapon/zion/player/sp/gauss_rifle_mod",
-            {
-                .L2 = new TriggerSetting (
-                        TriggerProfile::Machine,
-                        {4, 9, 1, 2, 40, 0}
-                ),
-                .R2 = new TriggerSetting (
-                        TriggerProfile::Galloping,
-                        {1, 3, 1, 6, 40}
-                )
-            }
-        },
-#endif
     };
 }
 
@@ -555,11 +412,9 @@ static std::atomic<bool>     g_R2HoldFired[4]      = {false, false, false, false
 static constexpr uint8_t  R2_FULL_THRESH   = 250;
 static constexpr uint64_t R2_HOLD_TIME_MS  = 500;
 
-#define TRIGGER_FULLY_PRESSED_THRESHOLD 250
-
 bool IsR2FullyPressed(const XINPUT_GAMEPAD& pad)
 {
-    return pad.bRightTrigger >= TRIGGER_FULLY_PRESSED_THRESHOLD;
+    return pad.bRightTrigger >= R2_FULL_THRESH;
 }
 
 bool L2HeldAndR2FullyPressedForOneSec(DWORD userIndex, const XINPUT_GAMEPAD& pad)
@@ -706,47 +561,23 @@ DWORD WINAPI XInputGetState_Hook(DWORD dwUserIndex, XINPUT_STATE* pState)
         // custom Ripper Rule computed on every poll, not only on L2 edge
         int weaponId = g_currWeaponId.load(std::memory_order_relaxed);
         if (weaponId == 5) {
-            /*if (!g_HasAmmoInClip[ weaponId ]) {
-                _LOGD("RipperWithSaw OFF (no ammo)!");
-                ForceSendLeftTrigger();
-            }*/
             if (g_L2Down[dwUserIndex].load(std::memory_order_relaxed)) {
                 if (IsPressed(*pState, PSButton::R1)) {
                     _LOGD("RipperWithSaw OFF!");
                     ForceSendLeftTrigger();
-                //} else if (L2HeldAndR2FullyPressedForOneSec(dwUserIndex, pState->Gamepad)) {
                 }
-                /*else if (IsR2FullyPressed(pState->Gamepad)) {
-                    _LOGD("RipperWithSaw ON!");
-                    SendLeftTrigger("RipperWithSaw");
-                }*/
             }
-
-
-            /*else {
-                // optional explicit reset when L2 not held
-                g_R2FullPressStart[dwUserIndex].store(0, std::memory_order_relaxed);
-                g_R2HoldFired[dwUserIndex].store(false, std::memory_order_relaxed);
-            }*/
         }
         else if (weaponId == 6) {
-            //if (g_L2Down[dwUserIndex].load(std::memory_order_relaxed)) {
-#if 0
-                if (IsPressed(*pState, PSButton::R1)) {
-                    _LOGD("ContactBeamActive OFF!");
-                    ForceSendLeftTrigger();
-                } else
-#endif
-                if (L2HeldAndR2FullyPressedForOneSec(dwUserIndex, pState->Gamepad)) {
-                    _LOGD("ContactBeamActive ON!");
-                    SendRightTrigger("ContactBeamActive");
-                }
-                else if (WasR2FullyPressedAndReleasedWhileL2Held(dwUserIndex, pState->Gamepad)) {
-                    _LOGD("ContactBeamActive OFF!");
-                    SendRightTrigger("Contact Beam");
-                    // or ResetRightTrigger(); depending on the effect you want
-                }
-            //}
+            if (L2HeldAndR2FullyPressedForOneSec(dwUserIndex, pState->Gamepad)) {
+                _LOGD("ContactBeamActive ON!");
+                SendRightTrigger("ContactBeamActive");
+            }
+            else if (WasR2FullyPressedAndReleasedWhileL2Held(dwUserIndex, pState->Gamepad)) {
+                _LOGD("ContactBeamActive OFF!");
+                SendRightTrigger("Contact Beam");
+                // or ResetRightTrigger(); depending on the effect you want
+            }
         }
 
         g_lastL2[dwUserIndex].store(l2, std::memory_order_relaxed);
@@ -1050,12 +881,8 @@ namespace DualsenseMod {
 
         auto lastKey = g_lastKeyAtomic.load(std::memory_order_relaxed);
 
-        //!strcmp(lastKey,"ability_mode") || !strcmp(lastKey,"status") ||
 
         if (lastKey && (!strcmp(lastKey, "npc_id"))) {
-            //_LOGD("[WS] key=%s value='%s'",
-            //      lastKey, value ? value : "(null)");
-
             // Enter Kinesis state if kinesis in armed state and
             // target npc id is found
             if (g_kinesisState == KinesisState::Armed) {
@@ -1281,16 +1108,6 @@ namespace DualsenseMod {
         if (isClipEmpty) {
             if (g_HasAmmoInClip [ weaponId ]) {
                 _LOGD("clip empty - disable triggers");
-#if 0
-                if (weaponId == 5) { // Ripper
-                    if (g_L2_isDown) {
-                        _LOGD("RipperWithSaw!");
-                        // Send a Special Left Trigger
-                        SendLeftTrigger("RipperWithSaw");
-                    }
-                }
-#endif
-
                 g_HasAmmoInClip [ weaponId ] = false;
                 // when HasAmmoInClip is false the following will send a clanky
                 // trigger setting, which will be active until the weapon gets
@@ -1299,25 +1116,12 @@ namespace DualsenseMod {
                     SendRightTrigger();
             }
         } else {
-            // Optional: re-enable when there is ammo in the clip again.
+            // re-enable when there is ammo in the clip again.
             if (!g_HasAmmoInClip [ weaponId ]) {
                 _LOGD("clip has ammo again - enable triggers");
                 g_HasAmmoInClip [ weaponId ] = true;
                 SendLeftTrigger();
             }
-            // this is fiering when we're aiming with ripper
-#if 0
-            else {
-                if (weaponId == 5) { // Ripper
-                    if (g_L2_isDown) {
-                        _LOGD("RipperWithSaw!");
-                        // Send a Special Left Trigger
-                        SendLeftTrigger("RipperWithSaw");
-                    }
-                }
-            }
-#endif
-
         }
     }
 
