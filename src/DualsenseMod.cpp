@@ -183,8 +183,10 @@ void InitTriggerSettings() {
             {
                 .L2 = new TriggerSetting (
                         TriggerProfile::Machine,
+                        {1, 9, 7, 7, 75, 0}
+                        //{1, 9, 5, 6, 75, 0}
                         //{1, 9, 7, 7, 65, 0}
-                        {1, 9, 5, 6, 75, 0}
+                        //{1, 9, 5, 6, 75, 0}
                 ),
                 .R2 = new TriggerSetting (
                         TriggerMode::Pulse_B,
@@ -213,9 +215,19 @@ void InitTriggerSettings() {
                         {7, 9, 0, 1, 8, 1}
                 ),
                 .R2 = new TriggerSetting (
-                        TriggerProfile::Vibration,
-                        {0, 4, 10}
+                        TriggerMode::Pulse_B,
+                        {109, 54, 66, 80, 43, 80, 80}
                 )
+
+#if 0
+                .R2 = new TriggerSetting (
+
+                    TriggerMode::Pulse_AB,
+                    {18, 197, 35, 58, 90, 120, 138}
+                    //    TriggerProfile::Galloping,
+                     //   {1, 3, 1, 6, 40}
+                )
+#endif
             }
         },
         {
@@ -397,6 +409,19 @@ void SendLeftTrigger(std::string weaponName) {
     _LOGD("Left Adaptive Trigger settings sent successfully!");
 }
 
+void SendRightTrigger(std::string weaponName) {
+    RETURN_IF_GAME_NOT_STARTED();
+    int weaponId = g_currWeaponId.load(std::memory_order_relaxed);
+    if (!g_HasAmmoInClip[ weaponId ])
+        return;
+    Triggers t = g_TriggerSettings[ weaponName ];
+    if (t.R2->isCustomTrigger)
+        dualsensitive::setRightCustomTrigger(t.R2->mode, t.R2->extras);
+    else
+        dualsensitive::setRightTrigger (t.R2->profile, t.R2->extras);
+    _LOGD("Right Adaptive Trigger settings sent successfully!");
+}
+
 void ForceSendLeftTrigger() {
     RETURN_IF_GAME_NOT_STARTED();
     int weaponId = g_currWeaponId.load(std::memory_order_relaxed);
@@ -410,6 +435,18 @@ void ForceSendLeftTrigger() {
     _LOGD("Left Adaptive Trigger forced: %s", weaponName.c_str());
 }
 
+void ForceSendRightTrigger() {
+    RETURN_IF_GAME_NOT_STARTED();
+    int weaponId = g_currWeaponId.load(std::memory_order_relaxed);
+    std::string weaponName = g_Weapons[ weaponId ];
+    Triggers t = g_TriggerSettings[weaponName];
+    if (t.R2->isCustomTrigger)
+        dualsensitive::setRightCustomTrigger(t.R2->mode, t.R2->extras);
+    else
+        dualsensitive::setRightTrigger(t.R2->profile, t.R2->extras);
+
+    _LOGD("Right Adaptive Trigger forced: %s", weaponName.c_str());
+}
 
 void SendRightTrigger() {
     RETURN_IF_GAME_NOT_STARTED();
@@ -516,7 +553,7 @@ static std::atomic<uint64_t> g_R2FullPressStart[4] = {0, 0, 0, 0};
 static std::atomic<bool>     g_R2HoldFired[4]      = {false, false, false, false};
 
 static constexpr uint8_t  R2_FULL_THRESH   = 250;
-static constexpr uint64_t R2_HOLD_TIME_MS  = 1000;
+static constexpr uint64_t R2_HOLD_TIME_MS  = 500;
 
 #define TRIGGER_FULLY_PRESSED_THRESHOLD 250
 
@@ -560,6 +597,36 @@ bool L2HeldAndR2FullyPressedForOneSec(DWORD userIndex, const XINPUT_GAMEPAD& pad
     g_R2HoldFired[userIndex].store(false, std::memory_order_relaxed);
     return false;
 }
+
+static std::atomic<bool> g_R2WasFullyPressed[4] = {false, false, false, false};
+
+bool WasR2FullyPressedAndReleasedWhileL2Held(DWORD userIndex, const XINPUT_GAMEPAD& pad)
+{
+    const bool l2Down = g_L2Down[userIndex].load(std::memory_order_relaxed);
+    const bool r2FullNow = pad.bRightTrigger >= R2_FULL_THRESH;
+    const bool r2WasFull = g_R2WasFullyPressed[userIndex].load(std::memory_order_relaxed);
+
+    // If L2 is no longer held, clear the latch.
+    if (!l2Down) {
+        g_R2WasFullyPressed[userIndex].store(false, std::memory_order_relaxed);
+        return false;
+    }
+
+    // While L2 is held, remember that R2 reached full press.
+    if (r2FullNow) {
+        g_R2WasFullyPressed[userIndex].store(true, std::memory_order_relaxed);
+        return false;
+    }
+
+    // Fire once when R2 is no longer fully pressed, but previously was.
+    if (r2WasFull) {
+        g_R2WasFullyPressed[userIndex].store(false, std::memory_order_relaxed);
+        return true;
+    }
+
+    return false;
+}
+
 
 DWORD WINAPI XInputGetState_Hook(DWORD dwUserIndex, XINPUT_STATE* pState)
 {
@@ -631,6 +698,7 @@ DWORD WINAPI XInputGetState_Hook(DWORD dwUserIndex, XINPUT_STATE* pState)
                 _LOGD("[XInput] L2 UP   (user=%u l2=%u)", dwUserIndex, l2);
                 EndKinesis("L2_UP");
                 ResetRightTrigger();
+                ForceSendLeftTrigger();
             }
         }
 
@@ -652,14 +720,33 @@ DWORD WINAPI XInputGetState_Hook(DWORD dwUserIndex, XINPUT_STATE* pState)
                     _LOGD("RipperWithSaw ON!");
                     SendLeftTrigger("RipperWithSaw");
                 }*/
-            //} else if (weaponId == "Contact Beam") {
-            //}
+            }
+
 
             /*else {
                 // optional explicit reset when L2 not held
                 g_R2FullPressStart[dwUserIndex].store(0, std::memory_order_relaxed);
                 g_R2HoldFired[dwUserIndex].store(false, std::memory_order_relaxed);
             }*/
+        }
+        else if (weaponId == 6) {
+            //if (g_L2Down[dwUserIndex].load(std::memory_order_relaxed)) {
+#if 0
+                if (IsPressed(*pState, PSButton::R1)) {
+                    _LOGD("ContactBeamActive OFF!");
+                    ForceSendLeftTrigger();
+                } else
+#endif
+                if (L2HeldAndR2FullyPressedForOneSec(dwUserIndex, pState->Gamepad)) {
+                    _LOGD("ContactBeamActive ON!");
+                    SendRightTrigger("ContactBeamActive");
+                }
+                else if (WasR2FullyPressedAndReleasedWhileL2Held(dwUserIndex, pState->Gamepad)) {
+                    _LOGD("ContactBeamActive OFF!");
+                    SendRightTrigger("Contact Beam");
+                    // or ResetRightTrigger(); depending on the effect you want
+                }
+            //}
         }
 
         g_lastL2[dwUserIndex].store(l2, std::memory_order_relaxed);
