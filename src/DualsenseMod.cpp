@@ -35,6 +35,9 @@
 
 #define INI_LOCATION "./mods/dualsense-mod.ini"
 
+#define RETURN_IF_GAME_NOT_STARTED() \
+    do { if (!g_gameStarted) return; } while (0)
+
 // TODO: move the following to a server utils file
 
 PROCESS_INFORMATION serverProcInfo;
@@ -67,11 +70,12 @@ Logger g_logger;
 
 std::map<std::string, Triggers> g_TriggerSettings ;
 
-
-// Game global vars
-
 HMODULE g_deadspaceBaseAddr = nullptr;
 static uintptr_t g_base = 0;
+
+int g_menuScreensUntilGameStart = 2;
+bool g_gameStarted = false;
+
 
 // holds the id of the current weapon
 static std::atomic<int>  g_currWeaponId{-1};
@@ -91,7 +95,6 @@ bool g_HasAmmoInClip[8] = {
     true, true, true, true, true, true, true, true
 };
 
-
 void InitTriggerSettings() {
     g_TriggerSettings =
     {
@@ -101,10 +104,12 @@ void InitTriggerSettings() {
                 .L2 = new TriggerSetting (
                         TriggerProfile::Choppy, {}
                 ),
+                /*
                 .R2 = new TriggerSetting (
                         TriggerProfile::Bow,
                         {1, 4, 3, 2}
-                )
+                )*/
+                .R2 = new TriggerSetting(TriggerProfile::Soft, {})
             }
         },
         {
@@ -115,7 +120,9 @@ void InitTriggerSettings() {
                 ),
                 .R2 = new TriggerSetting (
                         TriggerProfile::Galloping,
-                        {3, 9, 1, 2, 30}
+                        {2, 9, 1, 2, 80}
+                        //{3, 9, 1, 2, 80}
+                        //{1, 3, 1, 6, 40}
                 )
             }
         },
@@ -127,7 +134,9 @@ void InitTriggerSettings() {
                 ),
                 .R2 = new TriggerSetting (
                         TriggerProfile::MultiplePositionVibration,
-                        {14, 0, 1, 2, 3, 4, 5, 6, 7, 8, 8}
+                        //{14, 0, 1, 2, 3, 4, 5, 6, 7, 8, 8}
+                        //{15, 0, 1, 4, 6, 7, 8, 8, 7, 6, 4}
+                        {14, 0, 1, 2, 3, 4, 5, 6, 7, 7, 7}
                 )
             }
         },
@@ -169,19 +178,20 @@ void InitTriggerSettings() {
                 )
             }
         },
-        /*{
+        {
             "RipperWithSaw",
             {
                 .L2 = new TriggerSetting (
                         TriggerProfile::Machine,
-                        {1, 9, 1, 5, 100, 0}
+                        //{1, 9, 7, 7, 65, 0}
+                        {1, 9, 5, 6, 75, 0}
                 ),
                 .R2 = new TriggerSetting (
-                        TriggerProfile::Machine,
-                        {1, 9, 7, 7, 65, 0}
+                        TriggerMode::Pulse_B,
+                        {238, 215, 66, 120, 43, 160, 215}
                 )
             }
-        },*/
+        },
         {
             "Contact Beam", //"weapon/zion/player/sp/gauss_rifle",
             {
@@ -196,15 +206,32 @@ void InitTriggerSettings() {
             }
         },
         {
+            "ContactBeamActive", //"weapon/zion/player/sp/gauss_rifle",
+            {
+                .L2 = new TriggerSetting (
+                        TriggerProfile::Machine,
+                        {7, 9, 0, 1, 8, 1}
+                ),
+                .R2 = new TriggerSetting (
+                        TriggerProfile::Vibration,
+                        {0, 4, 10}
+                )
+            }
+        },
+        {
             "Hand Cannon",
             {
                 .L2 = new TriggerSetting (
-                    TriggerProfile::Choppy, {}
+                    TriggerProfile::Resistance, {8,1}
                 ),
-                .R2 = new TriggerSetting (
+                /*.R2 = new TriggerSetting (
                     TriggerMode::Pulse_AB,
                     {18, 197, 35, 58, 90, 120, 138}
-                )
+                    */
+
+                .R2 = new TriggerSetting (
+                    TriggerProfile::Resistance, {2, 1}
+                ),
             }
         },
 #if 0
@@ -343,14 +370,8 @@ void ResetLeftTrigger() {
     _LOGD("Left Adaptive Trigger reset successfully!");
 }
 
-void NoAmmoAdaptiveTriggers() {
-    dualsensitive::setLeftTrigger(TriggerProfile::Normal);
-    dualsensitive::setRightTrigger(TriggerProfile::GameCube);
-    _LOGD("No Ammo Adaptive Triggers set successfully!");
-}
-
-
 void SendLeftTrigger() {
+    RETURN_IF_GAME_NOT_STARTED();
     int weaponId = g_currWeaponId.load(std::memory_order_relaxed);
     if (!g_HasAmmoInClip[ weaponId ])
         return;
@@ -363,11 +384,41 @@ void SendLeftTrigger() {
     _LOGD("Left Adaptive Trigger settings sent successfully!");
 }
 
-
-void SendRightTrigger() {
+void SendLeftTrigger(std::string weaponName) {
+    RETURN_IF_GAME_NOT_STARTED();
     int weaponId = g_currWeaponId.load(std::memory_order_relaxed);
     if (!g_HasAmmoInClip[ weaponId ])
         return;
+    Triggers t = g_TriggerSettings[ weaponName ];
+    if (t.L2->isCustomTrigger)
+        dualsensitive::setLeftCustomTrigger(t.L2->mode, t.L2->extras);
+    else
+        dualsensitive::setLeftTrigger (t.L2->profile, t.L2->extras);
+    _LOGD("Left Adaptive Trigger settings sent successfully!");
+}
+
+void ForceSendLeftTrigger() {
+    RETURN_IF_GAME_NOT_STARTED();
+    int weaponId = g_currWeaponId.load(std::memory_order_relaxed);
+    std::string weaponName = g_Weapons[ weaponId ];
+    Triggers t = g_TriggerSettings[weaponName];
+    if (t.L2->isCustomTrigger)
+        dualsensitive::setLeftCustomTrigger(t.L2->mode, t.L2->extras);
+    else
+        dualsensitive::setLeftTrigger(t.L2->profile, t.L2->extras);
+
+    _LOGD("Left Adaptive Trigger forced: %s", weaponName.c_str());
+}
+
+
+void SendRightTrigger() {
+    RETURN_IF_GAME_NOT_STARTED();
+    int weaponId = g_currWeaponId.load(std::memory_order_relaxed);
+    if (!g_HasAmmoInClip[ weaponId ]) {
+        // clanky trigger for simulating no ammo
+        dualsensitive::setRightTrigger(TriggerProfile::GameCube);
+        return;
+    }
     std::string weaponName = g_Weapons[ weaponId ];
     Triggers t = g_TriggerSettings[ weaponName ];
     if (t.R2->isCustomTrigger)
@@ -378,9 +429,7 @@ void SendRightTrigger() {
 }
 
 void SendTriggers() {
-    int weaponId = g_currWeaponId.load(std::memory_order_relaxed);
-    if (!g_HasAmmoInClip[ weaponId ])
-        return;
+    RETURN_IF_GAME_NOT_STARTED();
     SendLeftTrigger();
     SendRightTrigger();
 }
@@ -458,9 +507,59 @@ static XInputGetState_t XInputGetState_Original = nullptr;
 static std::atomic<uint8_t> g_lastL2[4] = {0,0,0,0};
 static std::atomic<bool>    g_L2Down[4] = {false,false,false,false};
 static std::atomic<uint16_t> g_prevButtons[4] = {0,0,0,0};
+bool g_L2_isDown = false;
 
 static constexpr uint8_t L2_DOWN_THRESH = 30;   // press threshold
 static constexpr uint8_t L2_UP_THRESH   = 20;   // release threshold (hysteresis)
+
+static std::atomic<uint64_t> g_R2FullPressStart[4] = {0, 0, 0, 0};
+static std::atomic<bool>     g_R2HoldFired[4]      = {false, false, false, false};
+
+static constexpr uint8_t  R2_FULL_THRESH   = 250;
+static constexpr uint64_t R2_HOLD_TIME_MS  = 1000;
+
+#define TRIGGER_FULLY_PRESSED_THRESHOLD 250
+
+bool IsR2FullyPressed(const XINPUT_GAMEPAD& pad)
+{
+    return pad.bRightTrigger >= TRIGGER_FULLY_PRESSED_THRESHOLD;
+}
+
+bool L2HeldAndR2FullyPressedForOneSec(DWORD userIndex, const XINPUT_GAMEPAD& pad)
+{
+    const bool l2Down = g_L2Down[userIndex].load(std::memory_order_relaxed);
+    const bool r2Full = pad.bRightTrigger >= R2_FULL_THRESH;
+    const uint64_t now = GetTickCount64();
+
+    // The combo is only valid while L2 is held and R2 is fully pressed.
+    if (l2Down && r2Full)
+    {
+        uint64_t start = g_R2FullPressStart[userIndex].load(std::memory_order_relaxed);
+
+        if (start == 0)
+        {
+            g_R2FullPressStart[userIndex].store(now, std::memory_order_relaxed);
+            g_R2HoldFired[userIndex].store(false, std::memory_order_relaxed);
+            return false;
+        }
+
+        const bool alreadyFired =
+            g_R2HoldFired[userIndex].load(std::memory_order_relaxed);
+
+        if (!alreadyFired && (now - start >= R2_HOLD_TIME_MS))
+        {
+            g_R2HoldFired[userIndex].store(true, std::memory_order_relaxed);
+            return true; // fire once
+        }
+
+        return false;
+    }
+
+    // Reset as soon as either L2 is released or R2 is no longer fully pressed.
+    g_R2FullPressStart[userIndex].store(0, std::memory_order_relaxed);
+    g_R2HoldFired[userIndex].store(false, std::memory_order_relaxed);
+    return false;
+}
 
 DWORD WINAPI XInputGetState_Hook(DWORD dwUserIndex, XINPUT_STATE* pState)
 {
@@ -502,23 +601,22 @@ DWORD WINAPI XInputGetState_Hook(DWORD dwUserIndex, XINPUT_STATE* pState)
             }
         }
 
-
         // L2
 
         uint8_t l2 = pState->Gamepad.bLeftTrigger;
 
         // hysteresis to avoid flicker around threshold
         bool L2_wasDown = g_L2Down[dwUserIndex].load(std::memory_order_relaxed);
-        bool L2_isDown  = L2_wasDown;
+        g_L2_isDown  = L2_wasDown;
 
-        if (!L2_wasDown && l2 >= L2_DOWN_THRESH) L2_isDown = true;
-        else if (L2_wasDown && l2 <= L2_UP_THRESH) L2_isDown = false;
+        if (!L2_wasDown && l2 >= L2_DOWN_THRESH) g_L2_isDown = true;
+        else if (L2_wasDown && l2 <= L2_UP_THRESH) g_L2_isDown = false;
 
-        if (L2_isDown != L2_wasDown)
+        if (g_L2_isDown != L2_wasDown)
         {
-            g_L2Down[dwUserIndex].store(L2_isDown, std::memory_order_relaxed);
+            g_L2Down[dwUserIndex].store(g_L2_isDown, std::memory_order_relaxed);
 
-            if (L2_isDown && IsPressed(*pState, PSButton::Circle)) {
+            if (g_L2_isDown && IsPressed(*pState, PSButton::Circle)) {
                 if (g_kinesisState == KinesisState::Active) {
                     EndKinesis("Circle");
                 } else {
@@ -526,8 +624,7 @@ DWORD WINAPI XInputGetState_Hook(DWORD dwUserIndex, XINPUT_STATE* pState)
                     g_armTick.store(GetTickCount64());
                 }
             }
-
-            if (L2_isDown) {
+            if (g_L2_isDown) {
                 _LOGD("[XInput] L2 DOWN (user=%u l2=%u)", dwUserIndex, l2);
                 SendRightTrigger();
             } else {
@@ -535,6 +632,34 @@ DWORD WINAPI XInputGetState_Hook(DWORD dwUserIndex, XINPUT_STATE* pState)
                 EndKinesis("L2_UP");
                 ResetRightTrigger();
             }
+        }
+
+
+        // custom Ripper Rule computed on every poll, not only on L2 edge
+        int weaponId = g_currWeaponId.load(std::memory_order_relaxed);
+        if (weaponId == 5) {
+            /*if (!g_HasAmmoInClip[ weaponId ]) {
+                _LOGD("RipperWithSaw OFF (no ammo)!");
+                ForceSendLeftTrigger();
+            }*/
+            if (g_L2Down[dwUserIndex].load(std::memory_order_relaxed)) {
+                if (IsPressed(*pState, PSButton::R1)) {
+                    _LOGD("RipperWithSaw OFF!");
+                    ForceSendLeftTrigger();
+                //} else if (L2HeldAndR2FullyPressedForOneSec(dwUserIndex, pState->Gamepad)) {
+                }
+                /*else if (IsR2FullyPressed(pState->Gamepad)) {
+                    _LOGD("RipperWithSaw ON!");
+                    SendLeftTrigger("RipperWithSaw");
+                }*/
+            //} else if (weaponId == "Contact Beam") {
+            //}
+
+            /*else {
+                // optional explicit reset when L2 not held
+                g_R2FullPressStart[dwUserIndex].store(0, std::memory_order_relaxed);
+                g_R2HoldFired[dwUserIndex].store(false, std::memory_order_relaxed);
+            }*/
         }
 
         g_lastL2[dwUserIndex].store(l2, std::memory_order_relaxed);
@@ -783,7 +908,6 @@ namespace DualsenseMod {
             ApplyWeaponState.GetUIntPtr()
         );
 
-
         _LOG("InterruptGame at %p",
             InterruptGame.GetUIntPtr()
         );
@@ -864,7 +988,6 @@ namespace DualsenseMod {
     {
 
         uint8_t* out = dest ? *(uint8_t**)(dest + 0x18) : nullptr;
-
         ApplyWeaponState_Original(player, source, dest, secondarySource);
 
         int weaponId = *(int*)(out + 0x4E4);
@@ -876,6 +999,8 @@ namespace DualsenseMod {
                 g_Weapons[weaponId].c_str(),  weaponId
             );
             SendLeftTrigger();
+            if (g_L2_isDown)
+                SendRightTrigger();
         }
     }
 
@@ -905,13 +1030,15 @@ namespace DualsenseMod {
         int64_t param_3,   // R8
         void*   param_4    // R9   (was longlong* in decompile; treat as opaque pointer)
     );
+
     void __fastcall InterruptGame_Hook(void *param_1, int param_2, int64_t param_3, void *param_4)
     {
         _LOGD("InterruptGame Hook - Game paused or entered in RIG inventory!");
         g_gameplayActive.store(false, std::memory_order_release);
         EndKinesis("gameplay paused");
         ResetAdaptiveTriggers();
-
+        if (g_menuScreensUntilGameStart > 0)
+            g_menuScreensUntilGameStart--;
         InterruptGame_Original(param_1, param_2, param_3, param_4);
     }
 
@@ -919,6 +1046,10 @@ namespace DualsenseMod {
     {
         _LOGD("ResumeGame Hook - Game is on again!");
         g_gameplayActive.store(true, std::memory_order_release);
+
+        if (g_menuScreensUntilGameStart <= 0)
+            g_gameStarted = true;
+
         SendLeftTrigger();
 
         ResumeGame_Original(param_1, param_2, param_3, param_4);
@@ -1045,11 +1176,40 @@ namespace DualsenseMod {
               usedInClip, clipSize, ammoLeftInClip, isClipEmptyFlag ? 1 : 0, isClipEmpty ? 1 : 0);
 
         int weaponId = g_currWeaponId.load(std::memory_order_relaxed);
+
+        // if we had ammo before, just transition to ripper with saw
+        // no matter what
+        if (g_HasAmmoInClip [ weaponId ]) {
+            if (weaponId == 5) { // Ripper
+                if (g_L2_isDown) {
+                    _LOGD("RipperWithSaw!");
+                    // Send a Special Left Trigger
+                    SendLeftTrigger("RipperWithSaw");
+                }
+            }
+        }
+
+
+
         if (isClipEmpty) {
             if (g_HasAmmoInClip [ weaponId ]) {
                 _LOGD("clip empty - disable triggers");
+#if 0
+                if (weaponId == 5) { // Ripper
+                    if (g_L2_isDown) {
+                        _LOGD("RipperWithSaw!");
+                        // Send a Special Left Trigger
+                        SendLeftTrigger("RipperWithSaw");
+                    }
+                }
+#endif
+
                 g_HasAmmoInClip [ weaponId ] = false;
-                ResetAdaptiveTriggers();
+                // when HasAmmoInClip is false the following will send a clanky
+                // trigger setting, which will be active until the weapon gets
+                // reloaded
+                if (g_L2_isDown)
+                    SendRightTrigger();
             }
         } else {
             // Optional: re-enable when there is ammo in the clip again.
@@ -1058,6 +1218,19 @@ namespace DualsenseMod {
                 g_HasAmmoInClip [ weaponId ] = true;
                 SendLeftTrigger();
             }
+            // this is fiering when we're aiming with ripper
+#if 0
+            else {
+                if (weaponId == 5) { // Ripper
+                    if (g_L2_isDown) {
+                        _LOGD("RipperWithSaw!");
+                        // Send a Special Left Trigger
+                        SendLeftTrigger("RipperWithSaw");
+                    }
+                }
+            }
+#endif
+
         }
     }
 
@@ -1091,6 +1264,8 @@ namespace DualsenseMod {
                 int weaponId = g_currWeaponId.load(std::memory_order_relaxed);
                 g_HasAmmoInClip [ weaponId ] = true;
                 SendLeftTrigger();
+                if (g_L2_isDown)
+                    SendRightTrigger();
             }
         }
     }
