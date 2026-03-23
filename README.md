@@ -75,9 +75,6 @@ You may safely proceed by clicking:
 
 Now, you can experience the mod by just running the game.
 
-> [!NOTE]
-> If you have the game from EA App you need to add it to your Steam library first as the game doesn't have support for PS5 controller by default. Open your Steam client, go to **Games > Add a Non-Steam Game to My Library** and choose the game you want to add. If it's not listed, click Browse and find the game. Click Add Selected Programs and the game will now be listed in your Steam library.
-
 ## Uninstallation
 
 To uninstall the mod, simply go to **Settings > Add or remove programs**, locate the mod, choose uninstall and follow the prompts:
