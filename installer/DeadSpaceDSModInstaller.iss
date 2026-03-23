@@ -42,7 +42,7 @@ Source: "files\{#PluginDLL}"; DestDir: "{code:GetInstallPath}\mods"; Flags: igno
 Source: "files\{#INIFile}"; DestDir: "{code:GetInstallPath}\mods"; Flags: ignoreversion uninsrestartdelete
 Source: "files\{#ModExeName}"; DestDir: "{code:GetInstallPath}\mods"; Flags: ignoreversion uninsrestartdelete
 Source: "files\{#VbsScript}"; DestDir: "{code:GetInstallPath}\mods"; Flags: ignoreversion uninsrestartdelete
-Source: "assets\uninstaller (1).ico"; DestDir: "{app}"; DestName: "uninstaller.ico"; Flags: ignoreversion
+Source: "assets\uninstaller.ico"; DestDir: "{app}"; DestName: "uninstaller.ico"; Flags: ignoreversion
 Source: "assets\DualSensitive_dark.png"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
