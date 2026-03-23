@@ -362,12 +362,22 @@ begin
     Exit;
   end;
 
+  gameDir := AddBackslash(commonDir) + 'Dead Space (2023)';
+  if DirExists(gameDir) then
+  begin
+    OutDir := gameDir;
+    Result := True;
+    Exit;
+  end;
+
   if FileExists(AddBackslash(steamappsRoot) + 'appmanifest_1693980.acf') then
   begin
-    if DirExists(AddBackslash(commonDir) + 'Dead Space') then
+    if DirExists(AddBackslash(commonDir) + 'Dead Space (2023)') then
+      OutDir := AddBackslash(commonDir) + 'Dead Space (2023)'
+    else if DirExists(AddBackslash(commonDir) + 'Dead Space') then
       OutDir := AddBackslash(commonDir) + 'Dead Space'
     else
-      OutDir := commonDir;
+      OutDir := AddBackslash(commonDir) + 'Dead Space (2023)';
     Result := True;
     Exit;
   end;
@@ -499,13 +509,25 @@ begin
           Exit;
         end;
 
+        GameDir := AddBackslash(LibRoots[i]) + 'steamapps\common\Dead Space (2023)';
+        GameExe := GameDir + '\Dead Space.exe';
+        if FileExists(GameExe) or DirExists(GameDir) then
+        begin
+          SteamInstallPath := GameDir;
+          Result := True;
+          Log('Steam: found Dead Space at ' + SteamInstallPath);
+          Exit;
+        end;
+
         if FileExists(AddBackslash(LibRoots[i]) + 'steamapps\appmanifest_1693980.acf') then
         begin
-          GameDir := AddBackslash(LibRoots[i]) + 'steamapps\common\Dead Space';
+          GameDir := AddBackslash(LibRoots[i]) + 'steamapps\common\Dead Space (2023)';
           if DirExists(GameDir) then
             SteamInstallPath := GameDir
+          else if DirExists(AddBackslash(LibRoots[i]) + 'steamapps\common\Dead Space') then
+            SteamInstallPath := AddBackslash(LibRoots[i]) + 'steamapps\common\Dead Space'
           else
-            SteamInstallPath := AddBackslash(LibRoots[i]) + 'steamapps\common';
+            SteamInstallPath := AddBackslash(LibRoots[i]) + 'steamapps\common\Dead Space (2023)';
           Result := True;
           Log('Steam: found Dead Space via appmanifest at ' + SteamInstallPath);
           Exit;
@@ -738,6 +760,31 @@ begin
   end;
 end;
 
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+  begin
+    if (SteamCheckbox <> nil) and SteamCheckbox.Checked then
+    begin
+      if FileExistsInSteam() and (SteamInstallPath <> '') then
+        SelectedInstallPath := SteamInstallPath;
+      Log('CurStepChanged: Using Steam path: ' + SelectedInstallPath);
+    end
+    else if (EACheckbox <> nil) and EACheckbox.Checked then
+    begin
+      SelectedInstallPath := EAInstallPath;
+      Log('CurStepChanged: Using EA App path: ' + SelectedInstallPath);
+    end
+    else if (ManualCheckbox <> nil) and ManualCheckbox.Checked then
+    begin
+      SelectedInstallPath := ManualPathEdit.Text;
+      Log('CurStepChanged: Using manual path: ' + SelectedInstallPath);
+    end;
+
+    Log('CurStepChanged: Final SelectedInstallPath = ' + SelectedInstallPath);
+  end;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   i: Integer;
@@ -748,23 +795,23 @@ begin
   begin
     Log('Uninstall: Deleting scheduled task');
     Exec('schtasks.exe', '/Delete /TN "DualSensitive Service" /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    
+
     if RegQueryStringValue(HKCU, 'Software\DualSensitive\{#AppId}', 'GameInstallPath', GamePath) then
     begin
       Log('Uninstall: Found game path in registry: ' + GamePath);
-      
+
       if FileExists(GamePath + '\{#ProxyDLL}') then
       begin
         DeleteFile(GamePath + '\{#ProxyDLL}');
         Log('Uninstall: Deleted ' + GamePath + '\{#ProxyDLL}');
       end;
-      
+
       if FileExists(GamePath + '\mods\{#PluginDLL}') then
       begin
         DeleteFile(GamePath + '\mods\{#PluginDLL}');
         Log('Uninstall: Deleted ' + GamePath + '\mods\{#PluginDLL}');
       end;
-      
+
       if FileExists(GamePath + '\mods\{#INIFile}') then
       begin
         DeleteFile(GamePath + '\mods\{#INIFile}');
