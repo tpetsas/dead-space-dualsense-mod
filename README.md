@@ -15,7 +15,7 @@ Built with the tools and technologies:
 [![Ghidra](https://tinyurl.com/yuv64wyh)](https://ghidra-sre.org/)
 [![Radare2](https://tinyurl.com/52tue3ve)](https://rada.re/n/radare2.html)
 
-<img width="768" height="512" alt="logo" src="images/mod logo art.png" />
+<img alt="logo" src="images/mod logo art.png" />
 
 ## Overview
 
