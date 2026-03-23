@@ -2,9 +2,7 @@
 
 [installer-link]: https://github.com/tpetsas/dead-space-dualsense-mod/releases/latest/download/DeadSpace-DualSensitive-Mod_Setup.exe
 
-A mod for Dead Space (2023) that adds DualSense adaptive triggers for all the Weapons!
-
-Make us whole again! With DualSense is much more immersive! :godmode::metal:
+A mod for Dead Space Remake (2023) that adds DualSense adaptive triggers for all the Weapons!
 
 Built with the tools and technologies:
 
