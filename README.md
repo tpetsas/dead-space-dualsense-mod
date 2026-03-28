@@ -4,6 +4,8 @@
 
 A mod for Dead Space Remake (2023) that adds DualSense adaptive triggers for all the Weapons!
 
+Make Us Whole🤘
+
 Built with the tools and technologies:
 
 [![CMake](https://img.shields.io/badge/-CMake-darkslateblue?logo=cmake)](https://cmake.org/)
