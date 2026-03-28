@@ -11,8 +11,7 @@ Built with the tools and technologies:
 ![C++](https://img.shields.io/badge/-C++-darkblue?logo=cplusplus)
 [![DualSensitive](https://tinyurl.com/DualSensitive)](https://github.com/tpetsas/dualsensitive)
 [![Ghidra](https://tinyurl.com/yuv64wyh)](https://ghidra-sre.org/)
-[![Radare2](https://tinyurl.com/52tue3ve)](https://rada.re/n/radare2.html)
-
+[![IDA Pro](https://tinyurl.com/2dx6sv8t)](https://hex-rays.com/ida-pro)
 <img alt="logo" width="768" src="images/art.png" />
 
 ## Overview
