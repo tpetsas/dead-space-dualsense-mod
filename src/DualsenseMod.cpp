@@ -76,6 +76,9 @@ static uintptr_t g_base = 0;
 int g_menuScreensUntilGameStart = 2;
 bool g_gameStarted = false;
 
+static std::atomic<bool> g_playerDead{ false };
+
+
 
 // holds the id of the current weapon
 static std::atomic<int>  g_currWeaponId{-1};
@@ -487,7 +490,7 @@ DWORD WINAPI XInputGetState_Hook(DWORD dwUserIndex, XINPUT_STATE* pState)
 {
     DWORD ret = XInputGetState_Original(dwUserIndex, pState);
 
-    if (!g_gameplayActive)
+    if (g_playerDead || !g_gameplayActive)
         return ret;
 
     if (ret == ERROR_SUCCESS && pState && dwUserIndex < 4)
@@ -846,6 +849,7 @@ namespace DualsenseMod {
             WeaponReload.GetUIntPtr()
         );
 
+
         if (
             !WriteString        ||
             !WriteKey           ||
@@ -881,6 +885,18 @@ namespace DualsenseMod {
 
         auto lastKey = g_lastKeyAtomic.load(std::memory_order_relaxed);
 
+        if (lastKey) {
+            _LOGD("WriteString Hook - key: %s, value:%s", lastKey, value ? value : "(null)");
+        }
+
+        // Detect player death via death_cam event
+        if (lastKey && (!strcmp(lastKey, "death_cam"))) {
+            bool wasDead = g_playerDead.exchange(true);
+            if (!wasDead) {
+                _LOGD("[Player] Died! (death_cam detected) Resetting adaptive triggers");
+                ResetAdaptiveTriggers();
+            }
+        }
 
         if (lastKey && (!strcmp(lastKey, "npc_id"))) {
             // Enter Kinesis state if kinesis in armed state and
@@ -960,6 +976,11 @@ namespace DualsenseMod {
     {
         _LOGD("ResumeGame Hook - Game is on again!");
         g_gameplayActive.store(true, std::memory_order_release);
+
+        bool wasDead = g_playerDead.exchange(false);
+        if (wasDead) {
+            _LOGD("[Player] Respawned");
+        }
 
         if (g_menuScreensUntilGameStart <= 0)
             g_gameStarted = true;
@@ -1042,6 +1063,7 @@ namespace DualsenseMod {
 
         return EventDispatcher_Original(a1, a2, a3, a4, a5, a6);
     }
+
 
     void UpdateAmmo_Hook(long long* param_1, int param_2)
     {
